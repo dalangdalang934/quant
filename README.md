@@ -126,6 +126,20 @@ pnpm dev --port 3000
 - **当前持仓**：包含入场价、标记价、杠杆、保证金、持仓时长、止盈止损等。
 - **历史订单**：汇总最近 100 笔交易，含盈亏、持仓时长、平仓备注，可跳转到详情。
 
+## 附：ETH/BTC 双资产动量策略脚本
+
+仓库新增 `strategy/dual_asset_strategy.py`，把常用的 ETH/USDT ↔ BTC/USDT 配对逻辑标准化，方便在本地快速回测：
+
+- **策略要点**：以 ETH/BTC 价差的 21/55 均线金叉/死叉作为方向判断，持仓时同时做多一条腿、做空另一条腿，默认 3% 止损、6% 止盈、10 倍杠杆名义。
+- **依赖**：`pip install backtrader ccxt pandas`
+- **运行示例**：
+
+```bash
+python strategy/dual_asset_strategy.py --days 400 --timeframe 30m --fast 21 --slow 55 --leverage 8 --stop 0.025 --take 0.05
+```
+
+命令行参数可以覆盖周期、杠杆、止盈止损以及抽样天数，输出包含净值、收益率、夏普、回撤与 Profit Factor，方便与主策略对比或作为提示词素材。
+
 ## 常见问题
 
 1. **Binance API 报错 `-2019 margin is insufficient`**：调小 `position_size_pct` 或者在策略里启用 `cooldown_minutes`，确保同一周期不会重复开仓。
