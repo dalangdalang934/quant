@@ -11,6 +11,7 @@ import (
 	"nofx/market"
 	"nofx/pool"
 	"nofx/strategy"
+	"nofx/symbols"
 	"os"
 	"path/filepath"
 	"sort"
@@ -983,10 +984,10 @@ func (at *AutoTrader) syncPairStateFromPositions(rawPositions []map[string]inter
 }
 
 func detectRawPairDirection(rawPositions []map[string]interface{}) string {
-	hasEthLong := rawHasPosition(rawPositions, "ETHUSDT", "long")
-	hasEthShort := rawHasPosition(rawPositions, "ETHUSDT", "short")
-	hasBtcLong := rawHasPosition(rawPositions, "BTCUSDT", "long")
-	hasBtcShort := rawHasPosition(rawPositions, "BTCUSDT", "short")
+	hasEthLong := rawHasAssetPosition(rawPositions, "ETH", "long")
+	hasEthShort := rawHasAssetPosition(rawPositions, "ETH", "short")
+	hasBtcLong := rawHasAssetPosition(rawPositions, "BTC", "long")
+	hasBtcShort := rawHasAssetPosition(rawPositions, "BTC", "short")
 
 	switch {
 	case hasEthLong && hasBtcShort:
@@ -1013,6 +1014,15 @@ func rawHasPosition(rawPositions []map[string]interface{}, symbol, side string) 
 			continue
 		}
 		return true
+	}
+	return false
+}
+
+func rawHasAssetPosition(rawPositions []map[string]interface{}, asset, side string) bool {
+	for _, alias := range symbols.Aliases(asset) {
+		if rawHasPosition(rawPositions, alias, side) {
+			return true
+		}
 	}
 	return false
 }

@@ -634,8 +634,12 @@ func fetchMarketDataForContext(ctx *Context) error {
 	}
 
 	// ETH/BTC 配对策略依赖的基础腿，确保行情一定可用
-	symbolSet["ETHUSDT"] = true
-	symbolSet["BTCUSDT"] = true
+	for _, alias := range assetAliases("ETH") {
+		symbolSet[alias] = true
+	}
+	for _, alias := range assetAliases("BTC") {
+		symbolSet[alias] = true
+	}
 
 	// 并发获取市场数据
 	// 持仓币种集合（用于判断是否跳过OI检查）
@@ -706,7 +710,7 @@ func buildUserPrompt(ctx *Context) string {
 		ctx.CurrentTime, ctx.CallCount, ctx.RuntimeMinutes))
 
 	// BTC 市场
-	if btcData, hasBTC := ctx.MarketDataMap["BTCUSDT"]; hasBTC {
+	if btcData, _, hasBTC := marketDataForAsset(ctx, "BTC"); hasBTC {
 		sb.WriteString(fmt.Sprintf("**BTC**: %.2f (1h: %+.2f%%, 4h: %+.2f%%) | MACD: %.4f | RSI: %.2f\n\n",
 			btcData.CurrentPrice, btcData.PriceChange1h, btcData.PriceChange4h,
 			btcData.CurrentMACD, btcData.CurrentRSI7))
@@ -1052,7 +1056,7 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 		// 根据币种使用配置的杠杆上限
 		maxLeverage := altcoinLeverage          // 山寨币使用配置的杠杆
 		maxPositionValue := accountEquity * 1.5 // 山寨币最多1.5倍账户净值
-		if d.Symbol == "BTCUSDT" || d.Symbol == "ETHUSDT" {
+		if isMajorSymbol(d.Symbol) {
 			maxLeverage = btcEthLeverage          // BTC和ETH使用配置的杠杆
 			maxPositionValue = accountEquity * 10 // BTC/ETH最多10倍账户净值
 		}
@@ -1066,8 +1070,9 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 		// 验证仓位价值上限（加1%容差以避免浮点数精度问题）
 		tolerance := maxPositionValue * 0.01 // 1%容差
 		if d.PositionSizeUSD > maxPositionValue+tolerance {
-			if d.Symbol == "BTCUSDT" || d.Symbol == "ETHUSDT" {
-				return fmt.Errorf("BTC/ETH单币种仓位价值不能超过%.0f USDT（10倍账户净值），实际: %.0f", maxPositionValue, d.PositionSizeUSD)
+			if isMajorSymbol(d.Symbol) {
+				return fmt.Errorf("BTC/ETH 单币种仓位价值不能超过 %.0f USDT（10倍账户净值），实际: %.0f（%s）",
+					maxPositionValue, d.PositionSizeUSD, d.Symbol)
 			} else {
 				return fmt.Errorf("山寨币单币种仓位价值不能超过%.0f USDT（1.5倍账户净值），实际: %.0f", maxPositionValue, d.PositionSizeUSD)
 			}

@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"math"
 	"net/http"
+	"nofx/symbols"
 	"strconv"
 	"strings"
 )
@@ -1012,7 +1013,7 @@ func formatFloatSlice(values []float64) string {
 // Normalize 标准化symbol,确保是USDT交易对
 func Normalize(symbol string) string {
 	symbol = strings.ToUpper(symbol)
-	if strings.HasSuffix(symbol, "USDT") {
+	if symbols.HasStableQuote(symbol) {
 		return symbol
 	}
 	return symbol + "USDT"

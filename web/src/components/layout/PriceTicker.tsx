@@ -2,7 +2,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 
-const DEFAULT_TICKER_PAIRS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT", "XRPUSDT"] as const;
+const DEFAULT_TICKER_PAIRS = [
+  "BTCUSDT",
+  "BTCUSDC",
+  "ETHUSDT",
+  "ETHUSDC",
+  "SOLUSDT",
+  "BNBUSDT",
+  "DOGEUSDT",
+  "XRPUSDT",
+] as const;
+const SUPPORTED_SUFFIXES = ["USDT", "USDC"] as const;
 
 type TickerPair = string;
 
@@ -30,8 +40,11 @@ interface TickerItem {
 }
 
 const toLabel = (pair: TickerPair): string => {
-  if (pair.toUpperCase().endsWith("USDT")) {
-    return pair.slice(0, -4);
+  const upper = pair.toUpperCase();
+  for (const suffix of SUPPORTED_SUFFIXES) {
+    if (upper.endsWith(suffix)) {
+      return pair.slice(0, -suffix.length);
+    }
   }
   return pair;
 };
