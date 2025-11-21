@@ -30,8 +30,11 @@ export function TradeItem({ t }: { t: TradeRow }) {
             <span className="mr-1 align-middle">
               <ModelLogoChip modelId={t.model_id} size="sm" />
             </span>
-            <b style={{ color: modelColor }}>{getModelName(t.model_id)}</b>
-            <span> 完成了一笔 </span>
+              <span className="mr-1 text-[11px]" style={{ color: "var(--muted-text)" }}>
+                策略
+              </span>
+              <b style={{ color: modelColor }}>{getModelName(t.model_id)}</b>
+              <span> 完成了一笔 </span>
             <b style={{ color: sideColor }}>{sideZh(t.side)}</b>
             <span> 交易，标的 </span>
             <span className="inline-flex items-center gap-1 font-semibold">

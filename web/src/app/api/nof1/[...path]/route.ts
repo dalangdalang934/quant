@@ -149,7 +149,7 @@ interface CompetitionResponse {
   traders: Array<{
     trader_id: string;
     trader_name: string;
-    ai_model: string;
+    strategy?: string;
     total_equity?: number;
     total_pnl?: number;
     total_pnl_pct?: number;
@@ -297,9 +297,9 @@ type AccountTotalsPayload = { accountTotals: AccountTotalsRow[] };
 interface StatusRow {
   model_id: string;
   model_name?: string;
-  ai_model?: string;
+  strategy?: string;
+  strategy_label?: string | null;
   exchange?: string | null;
-  ai_provider?: string | null;
   is_running: boolean;
   runtime_minutes: number;
   call_count: number;
@@ -326,7 +326,7 @@ interface StatisticsRecord {
 interface StatisticsRow extends StatisticsRecord {
   model_id: string;
   model_name?: string;
-  ai_model?: string;
+  strategy?: string;
 }
 
 type StatisticsPayload = { statistics: StatisticsRow[] };
@@ -335,7 +335,7 @@ interface TradersResponse {
   traders?: Array<{
     trader_id: string;
     trader_name?: string;
-    ai_model?: string;
+    strategy?: string;
   }>;
 }
 
@@ -561,9 +561,9 @@ async function buildStatusPayload(): Promise<StatusPayload> {
           typeof statusRecord["exchange"] === "string"
             ? (statusRecord["exchange"] as string)
             : null;
-        const aiProvider =
-          typeof statusRecord["ai_provider"] === "string"
-            ? (statusRecord["ai_provider"] as string)
+        const strategyLabel =
+          typeof statusRecord["strategy_label"] === "string"
+            ? (statusRecord["strategy_label"] as string)
             : null;
         const scanInterval =
           typeof statusRecord["scan_interval"] === "string"
@@ -581,9 +581,9 @@ async function buildStatusPayload(): Promise<StatusPayload> {
         rows.push({
           model_id: id,
           model_name: trader.trader_name,
-          ai_model: trader.ai_model,
+          strategy: trader.strategy || strategyLabel || trader.trader_name,
+          strategy_label: strategyLabel,
           exchange,
-          ai_provider: aiProvider,
           is_running: Boolean(
             statusRecord["is_running"] ?? trader.is_running ?? false,
           ),
@@ -642,7 +642,7 @@ async function buildStatisticsPayload(): Promise<StatisticsPayload> {
         rows.push({
           model_id: id,
           model_name: trader.trader_name,
-          ai_model: trader.ai_model,
+          strategy: trader.strategy,
           total_cycles: Number(stats.total_cycles ?? 0),
           successful_cycles: Number(stats.successful_cycles ?? 0),
           failed_cycles: Number(stats.failed_cycles ?? 0),
@@ -922,11 +922,11 @@ async function handleLatestDecisions(req: NextRequest) {
       try {
         const decisions = await fetchJSON<DecisionRecord[]>(`/decisions/latest?trader_id=${encodeURIComponent(id)}`).catch<DecisionRecord[]>(() => []);
         if (!decisions.length) return;
-        rows.push({
-          model_id: id,
-          model_name: trader.trader_name,
-          ai_model: trader.ai_model,
-          records: decisions.map((decision) => ({
+          rows.push({
+            model_id: id,
+            model_name: trader.trader_name,
+            strategy: trader.strategy,
+            records: decisions.map((decision) => ({
             timestamp: parseTimestamp(decision.timestamp),
             cycle_number: (decision as any).cycle_number ?? null,
             summary: pickSummary(decision),
@@ -973,11 +973,11 @@ async function handlePerformance(req: NextRequest) {
       try {
         const perf = await fetchJSON<PerformanceAPIResponse>(`/performance?trader_id=${encodeURIComponent(traderId)}`).catch<PerformanceAPIResponse | null>(() => null);
         if (!perf) return;
-        rows.push({
-          model_id: traderId,
-          model_name: trader.trader_name,
-          ai_model: trader.ai_model,
-          totals: {
+          rows.push({
+            model_id: traderId,
+            model_name: trader.trader_name,
+            strategy: trader.strategy,
+            totals: {
             total_trades: perf.total_trades ?? 0,
             winning_trades: perf.winning_trades ?? 0,
             losing_trades: perf.losing_trades ?? 0,
@@ -1205,7 +1205,6 @@ async function handleLinkStatus(req: NextRequest) {
     { key: "status", label: "运行状态", path: withTrader("/status") },
     { key: "active-positions", label: "活跃仓位", path: withTrader("/positions/active") },
     { key: "exchange-trades", label: "交易所成交", path: withTrader("/exchange-trades?limit=5") },
-    { key: "ai-learning", label: "AI学习与反思", path: withTrader("/performance") },
   ];
 
   const items = await Promise.all(
@@ -1346,9 +1345,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
       if (parts[1] === "export-decisions") {
         return await forwardAction(req, "diagnostics/export-decisions");
       }
-    }
-    if (parts[0] === "control" && parts[1] === "trigger-learning") {
-      return await forwardAction(req, "control/trigger-learning");
     }
   } catch (error) {
     console.error(`POST handler failed for ${subpath}`, error);

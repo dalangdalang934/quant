@@ -19,7 +19,8 @@
         "stop_loss_atr_multiplier": 1.2,
         "take_profit_atr_multiplier": 2.8,
         "risk_reward": 2.8,
-        "min_hold_minutes": 10
+        "min_hold_minutes": 10,
+        "cooldown_minutes": 2
       }
     }
   ],
@@ -51,12 +52,5 @@
   "api_server_port": 8080,
   "max_daily_loss": 10.0,
   "max_drawdown": 20.0,
-  "stop_trading_minutes": 60,
-  "news_rss_url": "https://rss-public.bwe-ws.com/",
-  "news_websocket_url": "",
-  "news_storage_dir": "data/news",
-  "news_max_age": "12h",
-  "news_persist_cooldown": "5s",
-  "news_reconnect_delay": "10s",
-  "news_ping_interval": "40s"
+  "stop_trading_minutes": 60
 }

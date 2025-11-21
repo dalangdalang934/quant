@@ -1,25 +1,21 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"nofx/api"
 	"nofx/config"
 	"nofx/manager"
-	"nofx/mcp"
-	"nofx/news"
 	"nofx/pool"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 )
 
 func main() {
 	fmt.Println("╔════════════════════════════════════════════════════════════╗")
-	fmt.Println("║    🏆 AI模型交易竞赛系统 - Qwen vs DeepSeek               ║")
+	fmt.Println("║            📈 量化交易执行与监控系统                      ║")
 	fmt.Println("╚════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 
@@ -57,104 +53,28 @@ func main() {
 		log.Printf("✓ 已配置OI Top API")
 	}
 
-	// 初始化新闻服务
-	var newsSvc *news.Service
-	if cfg.NewsRSSURL != "" || cfg.NewsWebsocketURL != "" {
-		log.Printf("📰 初始化新闻服务...")
-		newsOpts := news.Options{
-			WebsocketURL: cfg.NewsWebsocketURL,
-			RSSURL:       cfg.NewsRSSURL,
-			StorageDir:   cfg.NewsStorageDir,
-		}
-
-		// 解析时间配置
-		if cfg.NewsMaxAge != "" {
-			if d, err := time.ParseDuration(cfg.NewsMaxAge); err == nil {
-				newsOpts.MaxAge = d
-			}
-		}
-		if cfg.NewsPersistCooldown != "" {
-			if d, err := time.ParseDuration(cfg.NewsPersistCooldown); err == nil {
-				newsOpts.PersistCooldown = d
-			}
-		}
-		if cfg.NewsReconnectDelay != "" {
-			if d, err := time.ParseDuration(cfg.NewsReconnectDelay); err == nil {
-				newsOpts.ReconnectDelay = d
-			}
-		}
-		if cfg.NewsPingInterval != "" {
-			if d, err := time.ParseDuration(cfg.NewsPingInterval); err == nil {
-				newsOpts.PingInterval = d
-			}
-		}
-
-		// 如果配置了AI，设置新闻摘要器（使用第一个启用的trader的AI配置）
-		var summarizer news.Summarizer
-		for _, trader := range cfg.Traders {
-			if !trader.Enabled {
-				continue
-			}
-			mcpClient := mcp.New()
-			if trader.AIModel == "custom" {
-				if trader.CustomAPIURL != "" && trader.CustomAPIKey != "" {
-					mcpClient.SetCustomAPI(trader.CustomAPIURL, trader.CustomAPIKey, trader.CustomModelName)
-					summarizer = news.NewMCPSummarizer(mcpClient)
-					log.Printf("📰 使用自定义AI (%s) 进行新闻摘要", trader.Name)
-					break
-				}
-			} else if trader.AIModel == "qwen" {
-				if trader.QwenKey != "" {
-					mcpClient.SetQwenAPIKey(trader.QwenKey, "")
-					summarizer = news.NewMCPSummarizer(mcpClient)
-					log.Printf("📰 使用Qwen (%s) 进行新闻摘要", trader.Name)
-					break
-				}
-			} else if trader.AIModel == "deepseek" {
-				if trader.DeepSeekKey != "" {
-					mcpClient.SetDeepSeekAPIKey(trader.DeepSeekKey)
-					summarizer = news.NewMCPSummarizer(mcpClient)
-					log.Printf("📰 使用DeepSeek (%s) 进行新闻摘要", trader.Name)
-					break
-				}
-			}
-		}
-		newsOpts.Summarizer = summarizer
-
-		var err error
-		newsSvc, err = news.NewService(newsOpts)
-		if err != nil {
-			log.Printf("⚠️  新闻服务初始化失败: %v，将不使用新闻功能", err)
-		} else {
-			news.SetDefaultService(newsSvc)
-			log.Printf("✓ 新闻服务初始化成功")
-
-			// 启动新闻服务后台任务
-			ctx := context.Background()
-			go func() {
-				newsSvc.Run(ctx)
-			}()
-			log.Printf("✓ 新闻服务后台任务已启动")
-		}
-	} else {
-		log.Printf("⏭️  未配置新闻服务，跳过初始化")
-	}
+	// （新闻摘要功能已停用）
 
 	// 创建TraderManager
 	traderManager := manager.NewTraderManager()
 
-	// 添加所有启用的trader
+	// 仅保留第一个启用的 trader
 	enabledCount := 0
+	addedTrader := false
 	for i, traderCfg := range cfg.Traders {
 		// 跳过未启用的trader
 		if !traderCfg.Enabled {
 			log.Printf("⏭️  [%d/%d] 跳过未启用的 %s", i+1, len(cfg.Traders), traderCfg.Name)
 			continue
 		}
+		if addedTrader {
+			log.Printf("⏭️  [%d/%d] 系统仅运行一个交易员，已忽略 %s", i+1, len(cfg.Traders), traderCfg.Name)
+			continue
+		}
 
 		enabledCount++
-		log.Printf("📦 [%d/%d] 初始化 %s (%s模型)...",
-			i+1, len(cfg.Traders), traderCfg.Name, strings.ToUpper(traderCfg.AIModel))
+		log.Printf("📦 [%d/%d] 初始化 %s (%s 策略)...",
+			i+1, len(cfg.Traders), traderCfg.Name, strings.ToUpper(traderCfg.Strategy))
 
 		err := traderManager.AddTrader(
 			traderCfg,
@@ -167,6 +87,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("❌ 初始化trader失败: %v", err)
 		}
+		addedTrader = true
 	}
 
 	// 检查是否至少有一个启用的trader
@@ -182,18 +103,17 @@ func main() {
 			continue
 		}
 		fmt.Printf("  • %s (%s) - 初始资金: %.0f USDT\n",
-			traderCfg.Name, strings.ToUpper(traderCfg.AIModel), traderCfg.InitialBalance)
+			traderCfg.Name, strings.ToUpper(traderCfg.Strategy), traderCfg.InitialBalance)
 	}
 
 	fmt.Println()
-	fmt.Println("🤖 AI全权决策模式:")
-	fmt.Printf("  • AI将自主决定每笔交易的杠杆倍数（山寨币最高%d倍，BTC/ETH最高%d倍）\n",
+	fmt.Println("📐 策略说明:")
+	fmt.Printf("  • 系统会根据量化信号自动评估多空机会（山寨币最高%d倍，BTC/ETH最高%d倍）\n",
 		cfg.Leverage.AltcoinLeverage, cfg.Leverage.BTCETHLeverage)
-	fmt.Println("  • AI将自主决定每笔交易的仓位大小")
-	fmt.Println("  • AI将自主设置止损和止盈价格")
-	fmt.Println("  • AI将基于市场数据、技术指标、账户状态做出全面分析")
+	fmt.Println("  • 仓位大小、止损止盈均由策略参数与账户情况动态计算")
+	fmt.Println("  • 仅保留一个量化交易员，聚焦执行与复盘")
 	fmt.Println()
-	fmt.Println("⚠️  风险提示: AI自动交易有风险，建议小额资金测试！")
+	fmt.Println("⚠️  风险提示: 自动交易仍有市场风险，建议在小额资金上验证策略后再扩大资金规模")
 	fmt.Println()
 	fmt.Println("按 Ctrl+C 停止运行")
 	fmt.Println(strings.Repeat("=", 60))
@@ -222,5 +142,5 @@ func main() {
 	traderManager.StopAll()
 
 	fmt.Println()
-	fmt.Println("👋 感谢使用AI交易竞赛系统！")
+	fmt.Println("👋 感谢使用量化交易监控系统！")
 }

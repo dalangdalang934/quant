@@ -13,11 +13,10 @@ import (
 
 // TraderConfig 单个trader的配置
 type TraderConfig struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Enabled bool   `json:"enabled"`           // 是否启用该trader
-	Strategy string `json:"strategy,omitempty"` // 机制名称（如 "quant"）
-	AIModel  string `json:"ai_model,omitempty"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Enabled  bool   `json:"enabled"`            // 是否启用该trader
+	Strategy string `json:"strategy,omitempty"` // 策略名称（默认为 quant）
 
 	// 交易平台选择（二选一）
 	Exchange   string `json:"exchange"`              // "binance" or "hyperliquid"
@@ -49,13 +48,13 @@ type TraderConfig struct {
 
 // BinanceStreamConfig 币安 Websocket 流配置
 type BinanceStreamConfig struct {
-	MarketEnabled              bool   `json:"market_enabled,omitempty"`
-	UserEnabled                bool   `json:"user_enabled,omitempty"`
-	MarketReconnectDelay       string `json:"market_reconnect_delay,omitempty"`
-	MarketPingInterval         string `json:"market_ping_interval,omitempty"`
-	UserReconnectDelay         string `json:"user_reconnect_delay,omitempty"`
-	UserPingInterval           string `json:"user_ping_interval,omitempty"`
-	ListenKeyRefreshInterval   string `json:"listen_key_refresh_interval,omitempty"`
+	MarketEnabled            bool   `json:"market_enabled,omitempty"`
+	UserEnabled              bool   `json:"user_enabled,omitempty"`
+	MarketReconnectDelay     string `json:"market_reconnect_delay,omitempty"`
+	MarketPingInterval       string `json:"market_ping_interval,omitempty"`
+	UserReconnectDelay       string `json:"user_reconnect_delay,omitempty"`
+	UserPingInterval         string `json:"user_ping_interval,omitempty"`
+	ListenKeyRefreshInterval string `json:"listen_key_refresh_interval,omitempty"`
 }
 
 // LeverageConfig 杠杆配置
@@ -77,15 +76,6 @@ type Config struct {
 	MaxDrawdown        float64        `json:"max_drawdown"`
 	StopTradingMinutes int            `json:"stop_trading_minutes"`
 	Leverage           LeverageConfig `json:"leverage"` // 杠杆配置
-
-	// 新闻服务配置
-	NewsWebsocketURL    string `json:"news_websocket_url,omitempty"`
-	NewsRSSURL          string `json:"news_rss_url,omitempty"`
-	NewsStorageDir      string `json:"news_storage_dir,omitempty"`
-	NewsMaxAge          string `json:"news_max_age,omitempty"`          // 例如 "2h"
-	NewsPersistCooldown string `json:"news_persist_cooldown,omitempty"` // 例如 "5s"
-	NewsReconnectDelay  string `json:"news_reconnect_delay,omitempty"`  // 例如 "10s"
-	NewsPingInterval    string `json:"news_ping_interval,omitempty"`    // 例如 "40s"
 }
 
 // LoadConfig 从文件加载配置
@@ -141,13 +131,10 @@ func LoadConfig(filename string) (*Config, error) {
 	// 规范化策略配置
 	for i := range config.Traders {
 		trader := &config.Traders[i]
-		if trader.Strategy == "" {
-			trader.Strategy = strings.ToLower(strings.TrimSpace(trader.AIModel))
-		}
+		trader.Strategy = strings.ToLower(strings.TrimSpace(trader.Strategy))
 		if trader.Strategy == "" {
 			trader.Strategy = "quant"
 		}
-		trader.AIModel = trader.Strategy
 		trader.Quant.Normalize()
 	}
 
@@ -189,7 +176,6 @@ func (c *Config) Validate() error {
 		if trader.Strategy != "quant" {
 			return fmt.Errorf("trader[%d]: strategy必须为 'quant'", i)
 		}
-		trader.AIModel = trader.Strategy
 
 		// 验证交易平台配置
 		if trader.Exchange == "" {
@@ -319,56 +305,56 @@ func ensureFuturesSymbolsExist(symbols []string) error {
 }
 
 func fetchBinanceFuturesSymbols() (map[string]bool, error) {
-    const maxAttempts = 3
-    var lastErr error
-    for attempt := 1; attempt <= maxAttempts; attempt++ {
-        result, err := fetchBinanceFuturesSymbolsOnce()
-        if err == nil {
-            return result, nil
-        }
-        lastErr = err
-        if attempt < maxAttempts {
-            time.Sleep(time.Duration(attempt) * 2 * time.Second)
-        }
-    }
-    return nil, fmt.Errorf("获取币安交易对清单失败: %w", lastErr)
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		result, err := fetchBinanceFuturesSymbolsOnce()
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		if attempt < maxAttempts {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
+	}
+	return nil, fmt.Errorf("获取币安交易对清单失败: %w", lastErr)
 }
 
 func fetchBinanceFuturesSymbolsOnce() (map[string]bool, error) {
-    client := &http.Client{Timeout: 25 * time.Second}
-    resp, err := client.Get("https://fapi.binance.com/fapi/v1/exchangeInfo")
-    if err != nil {
-        return nil, err
-    }
-    defer resp.Body.Close()
+	client := &http.Client{Timeout: 25 * time.Second}
+	resp, err := client.Get("https://fapi.binance.com/fapi/v1/exchangeInfo")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
-    if resp.StatusCode != http.StatusOK {
-        body, _ := io.ReadAll(resp.Body)
-        return nil, fmt.Errorf("status=%d body=%s", resp.StatusCode, string(body))
-    }
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("status=%d body=%s", resp.StatusCode, string(body))
+	}
 
-    var payload struct {
-        Symbols []struct {
-            Symbol       string `json:"symbol"`
-            ContractType string `json:"contractType"`
-            Status       string `json:"status"`
-        } `json:"symbols"`
-    }
+	var payload struct {
+		Symbols []struct {
+			Symbol       string `json:"symbol"`
+			ContractType string `json:"contractType"`
+			Status       string `json:"status"`
+		} `json:"symbols"`
+	}
 
-    if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-        return nil, err
-    }
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
 
-    result := make(map[string]bool, len(payload.Symbols))
-    for _, item := range payload.Symbols {
-        if !strings.EqualFold(item.ContractType, "PERPETUAL") {
-            continue
-        }
-        if !strings.EqualFold(item.Status, "TRADING") {
-            continue
-        }
-        result[strings.ToUpper(item.Symbol)] = true
-    }
+	result := make(map[string]bool, len(payload.Symbols))
+	for _, item := range payload.Symbols {
+		if !strings.EqualFold(item.ContractType, "PERPETUAL") {
+			continue
+		}
+		if !strings.EqualFold(item.Status, "TRADING") {
+			continue
+		}
+		result[strings.ToUpper(item.Symbol)] = true
+	}
 
-    return result, nil
+	return result, nil
 }
