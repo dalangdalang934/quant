@@ -124,6 +124,9 @@ type AutoTrader struct {
 
 	// 量化策略
 	quantConfig strategy.QuantConfig
+
+	// ETH/BTC 配对仓位状态
+	pairState decision.PairState
 }
 
 // NewAutoTrader 创建自动交易器
@@ -936,6 +939,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 
 	// 5.3. 更新学习状态缓存
 	// 6. 构建上下文
+	at.syncPairStateFromPositions(positions, totalEquity)
 	ctx := &decision.Context{
 		CurrentTime:     time.Now().Format("2006-01-02 15:04:05"),
 		RuntimeMinutes:  int(time.Since(at.startTime).Minutes()),
@@ -955,9 +959,62 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		CandidateCoins: candidateCoins,
 		Performance:    performance, // 添加历史表现分析
 		Strategy:       at.quantConfig.Copy(),
+		PairState:      at.pairState.Copy(),
 	}
 
 	return ctx, nil
+}
+
+func (at *AutoTrader) syncPairStateFromPositions(rawPositions []map[string]interface{}, totalEquity float64) {
+	direction := detectRawPairDirection(rawPositions)
+	if direction == "" {
+		if at.pairState.Active {
+			at.pairState = decision.PairState{}
+		}
+		return
+	}
+
+	if !at.pairState.Active || at.pairState.Direction != direction {
+		at.pairState.Active = true
+		at.pairState.Direction = direction
+		at.pairState.EntryEquity = totalEquity
+		at.pairState.EntryTime = time.Now()
+	}
+}
+
+func detectRawPairDirection(rawPositions []map[string]interface{}) string {
+	hasEthLong := rawHasPosition(rawPositions, "ETHUSDT", "long")
+	hasEthShort := rawHasPosition(rawPositions, "ETHUSDT", "short")
+	hasBtcLong := rawHasPosition(rawPositions, "BTCUSDT", "long")
+	hasBtcShort := rawHasPosition(rawPositions, "BTCUSDT", "short")
+
+	switch {
+	case hasEthLong && hasBtcShort:
+		return decision.PairDirectionLong
+	case hasEthShort && hasBtcLong:
+		return decision.PairDirectionShort
+	default:
+		return ""
+	}
+}
+
+func rawHasPosition(rawPositions []map[string]interface{}, symbol, side string) bool {
+	for _, pos := range rawPositions {
+		sym, _ := pos["symbol"].(string)
+		if !strings.EqualFold(sym, symbol) {
+			continue
+		}
+		posSide, _ := pos["side"].(string)
+		if !strings.EqualFold(posSide, side) {
+			continue
+		}
+		qty, _ := pos["positionAmt"].(float64)
+		if math.Abs(qty) <= 1e-9 {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func (at *AutoTrader) applyRiskGuards(ctx *decision.Context, decisions []decision.Decision) []decision.Decision {
