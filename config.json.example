@@ -1,0 +1,62 @@
+{
+  "traders": [
+    {
+      "id": "binance_deepseek",
+      "name": "Binance Quant",
+      "enabled": true,
+      "exchange": "binance",
+      "margin_type": "isolated",
+      "binance_api_key": "your_binance_api_key",
+      "binance_secret_key": "your_binance_secret_key",
+      "initial_balance": 50,
+      "scan_interval_minutes": 2,
+      "quant_config": {
+        "allow_short": true,
+        "max_long_positions": 2,
+        "max_short_positions": 1,
+        "position_size_pct": 0.12,
+        "min_signal_score": 4,
+        "stop_loss_atr_multiplier": 1.3,
+        "take_profit_atr_multiplier": 3.2,
+        "risk_reward": 2.8,
+        "min_hold_minutes": 15
+      }
+    }
+  ],
+  "leverage": {
+    "btc_eth_leverage": 5,
+    "altcoin_leverage": 5
+  },
+  "use_default_coins": true,
+  "default_coins": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "BNBUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+    "ADAUSDT",
+    "AVAXUSDT",
+    "TRXUSDT",
+    "LINKUSDT",
+    "DOTUSDT",
+    "ATOMUSDT",
+    "LTCUSDT",
+    "ARBUSDT",
+    "OPUSDT",
+    "HYPEUSDT"
+  ],
+  "coin_pool_api_url": "",
+  "oi_top_api_url": "",
+  "api_server_port": 8080,
+  "max_daily_loss": 10.0,
+  "max_drawdown": 20.0,
+  "stop_trading_minutes": 60,
+  "news_rss_url": "https://rss-public.bwe-ws.com/",
+  "news_websocket_url": "",
+  "news_storage_dir": "data/news",
+  "news_max_age": "12h",
+  "news_persist_cooldown": "5s",
+  "news_reconnect_delay": "10s",
+  "news_ping_interval": "40s"
+}

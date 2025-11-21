@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1
+
+ARG GO_VERSION=1.25
+
+FROM golang:${GO_VERSION}-bookworm AS builder
+WORKDIR /app
+ENV CGO_ENABLED=0 GOOS=linux GO111MODULE=on GOFLAGS=-mod=mod
+
+# Install dependencies first (better layer caching)
+COPY go.mod go.sum ./
+RUN go env -w GO111MODULE=on && go mod download
+
+# Copy the rest of the project (respecting .dockerignore)
+COPY . .
+
+# Build the backend binary
+RUN go env -w GO111MODULE=on && go build -o /app/nofx .
+
+FROM debian:bookworm-slim AS runner
+WORKDIR /app
+
+# Include CA certificates for outbound HTTPS calls (exchanges, data APIs)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/nofx ./nofx
+
+EXPOSE 8080
+
+# Default config path can be overridden at runtime
+ENV CONFIG_PATH=/config/config.json
+
+ENTRYPOINT ["./nofx"]
+CMD ["/config/config.json"]

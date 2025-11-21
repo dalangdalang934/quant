@@ -1,0 +1,105 @@
+# ===== IDE 配置文件 =====
+.idea/
+*.iml
+*.xml
+.vscode/
+
+# ===== 编译产物 =====
+# Go 二进制文件
+nofx-auto
+nofx
+nofx_test
+main
+trading-bot
+*.exe
+*.dll
+*.so
+*.dylib
+
+# ===== Go 缓存/测试 =====
+*.test
+*.out
+.gocache/
+vendor/
+go.work.sum
+
+# ===== 操作系统文件 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== 临时文件 =====
+*.log
+*.tmp
+*.temp
+*.bak
+*.backup
+*.swp
+*.swo
+*~
+nohup.out
+
+# ===== 环境变量（包含敏感信息） =====
+.env
+.env.local
+.env.*.local
+
+# ===== 配置文件（包含API密钥等敏感信息） =====
+config.json
+config.local.json
+config.prod.json
+config.dev.json
+
+# ===== 运行时日志目录 =====
+logs/
+decision_logs/
+*.log
+
+# ===== 缓存目录 =====
+coin_pool_cache/
+cache/
+.cache/
+
+# ===== Node.js =====
+node_modules/
+web/node_modules/
+web/dist/
+web/build/
+web/.next/
+web/.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.Python
+venv/
+env/
+.virtualenv
+
+# ===== 归档文件 =====
+archives/
+*.zip
+*.tar.gz
+*.rar
+
+# ===== 其他运行时生成的文件 =====
+*.pid
+*.seed
+*.pid.lock
+
+# ===== 数据目录（仅保留空结构） =====
+/data/*
+!/data/.gitkeep
+
+# ===== 注意 =====
+# 以下目录/文件现在可以提交到仓库：
+# - learning/            # 学习状态文件
+# - news/               # 新闻数据文件
+# - config.mock.json    # 示例配置文件
+# - config.json.example # 配置文件模板

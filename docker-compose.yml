@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      args:
+        GO_VERSION: ${GO_VERSION:-1.25}
+    container_name: jiaoyibot-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - GIN_MODE=${GIN_MODE:-release}
+      - CONFIG_PATH=${CONFIG_PATH:-/config/config.json}
+    volumes:
+      - ${CONFIG_FILE:-./config.json}:${CONFIG_PATH:-/config/config.json}:ro
+      - ./decision_logs:/app/decision_logs
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./archives:/app/archives
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+
+  frontend:
+    build:
+      context: ./web
+      dockerfile: Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_NOF1_API_BASE_URL: ${NEXT_PUBLIC_NOF1_API_BASE_URL:-/api/nof1}
+        NEXT_PUBLIC_TICKER_PAIRS: ${NEXT_PUBLIC_TICKER_PAIRS:-BTCUSDT,ETHUSDT,SOLUSDT}
+    container_name: jiaoyibot-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=${FRONTEND_PORT:-3000}
+      - HOST=0.0.0.0
+      - NOF1_API_BASE_URL=${NOF1_API_BASE_URL:-http://backend:8080}
+      - NEXT_PUBLIC_NOF1_API_BASE_URL=${NEXT_PUBLIC_NOF1_API_BASE_URL:-/api/nof1}
+      - NEXT_PUBLIC_TICKER_PAIRS=${NEXT_PUBLIC_TICKER_PAIRS:-BTCUSDT,ETHUSDT,SOLUSDT}
+      - NEXT_PUBLIC_TWITTER_HANDLE=${NEXT_PUBLIC_TWITTER_HANDLE:-wquguru}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"

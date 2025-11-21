@@ -1,0 +1,11 @@
+.git
+.gitignore
+logs
+logs/*
+decision_logs
+config.mock.json
+*.log
+web/.next
+web/node_modules
+web/logs
+web/public/screenshots
