@@ -31,28 +31,51 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-ensure_docker() {
-  if ! command_exists docker; then
-    error "未检测到 docker，请先安装 Docker Desktop 或 docker-ce。"
+ensure_root() {
+  if [[ "${EUID}" -ne 0 ]]; then
+    error "请使用 root 权限运行：sudo ./startsd.sh"
     exit 1
+  }
+}
+
+install_docker() {
+  info "检测 Docker 环境..."
+  if command_exists docker; then
+    success "Docker 已安装"
+  else
+    warn "Docker 未安装，开始自动安装..."
+    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+    sh /tmp/get-docker.sh
+    rm -f /tmp/get-docker.sh
+    systemctl enable docker >/dev/null 2>&1 || true
+    systemctl start docker >/dev/null 2>&1 || true
+    success "Docker 安装完成"
   fi
+
   if ! docker info >/dev/null 2>&1; then
-    error "docker 守护进程不可用，请确认已启动且当前用户有权限。"
+    error "docker 守护进程不可用，请确认已启动。"
     exit 1
-  fi
+  }
 }
 
 ensure_compose() {
   if docker compose version >/dev/null 2>&1; then
     DOCKER_COMPOSE_CMD=(docker compose)
+    success "检测到 docker compose 插件"
     return
   fi
   if command_exists docker-compose; then
     DOCKER_COMPOSE_CMD=(docker-compose)
+    success "检测到 docker-compose 可执行文件"
     return
   fi
-  error "未找到 docker compose，请安装 Docker Compose v2（推荐）或 docker-compose。"
-  exit 1
+  warn "未检测到 docker compose，正在安装..."
+  mkdir -p /usr/local/lib/docker/cli-plugins
+  curl -SL "https://github.com/docker/compose/releases/download/v2.24.6/docker-compose-linux-$(uname -m)" \
+    -o /usr/local/lib/docker/cli-plugins/docker-compose
+  chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+  DOCKER_COMPOSE_CMD=(docker compose)
+  success "docker compose 安装完成"
 }
 
 prepare_project() {
@@ -147,7 +170,8 @@ EOF
 }
 
 main() {
-  ensure_docker
+  ensure_root
+  install_docker
   ensure_compose
   prepare_project
   load_env_if_exists
