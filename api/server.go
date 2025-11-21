@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"nofx/logger"
 	"nofx/manager"
-	"nofx/news"
 	"nofx/pool"
 	"sort"
 	"strconv"
@@ -84,7 +83,6 @@ func (s *Server) setupRoutes() {
 		api.GET("/equity-history", s.handleEquityHistory)
 		api.GET("/performance", s.handlePerformance)
 		api.GET("/exchange-trades", s.handleExchangeTrades)
-		api.GET("/news/digests", s.handleNewsDigests)
 
 		// 仓位相关
 		api.GET("/positions/active", s.handleActivePositions)
@@ -95,7 +93,6 @@ func (s *Server) setupRoutes() {
 		api.POST("/diagnostics/sync-positions", s.handleSyncPositions)
 		api.POST("/diagnostics/refresh-coin-pool", s.handleRefreshCoinPool)
 		api.POST("/diagnostics/export-decisions", s.handleExportDecisions)
-		api.POST("/control/trigger-learning", s.handleTriggerLearning)
 	}
 }
 
@@ -142,7 +139,7 @@ func (s *Server) handleTraderList(c *gin.Context) {
 		result = append(result, map[string]interface{}{
 			"trader_id":   t.GetID(),
 			"trader_name": t.GetName(),
-			"ai_model":    t.GetAIModel(),
+			"strategy":    t.GetStrategyLabel(),
 		})
 	}
 
@@ -414,7 +411,7 @@ func (s *Server) handleEquityHistory(c *gin.Context) {
 	c.JSON(http.StatusOK, history)
 }
 
-// handlePerformance AI历史表现分析（用于展示AI学习和反思）
+// handlePerformance 历史表现分析
 func (s *Server) handlePerformance(c *gin.Context) {
 	_, traderID, err := s.getTraderFromQuery(c)
 	if err != nil {
@@ -505,13 +502,13 @@ func (s *Server) handlePerformance(c *gin.Context) {
 	performance.RecentTrades = allTrades
 
 	// 对于仓位历史，我们显示所有保存的交易，不进行周期过滤
-	// 因为这些是AI实际执行的交易，应该全部显示给用户
+	// 因为这些是策略实际执行的交易，应该全部显示给用户
 	periodStart, periodSource := auto.GetDecisionLogger().DetectPeriodStart(auto.GetStartTime())
 
 	// 不过滤，直接使用所有交易
 	performance.PeriodStart = periodStart
 	performance.PeriodSource = periodSource
-	
+
 	log.Printf("📊 程序运行周期: %s 开始（来源: %s）", periodStart.Format("2006-01-02 15:04:05"), periodSource)
 
 	performance.TotalTrades = len(allTrades)
@@ -629,9 +626,8 @@ func (s *Server) Start() error {
 	log.Printf("  • GET  /api/decisions/latest?trader_id=xxx - 指定trader的最新决策")
 	log.Printf("  • GET  /api/statistics?trader_id=xxx - 指定trader的统计信息")
 	log.Printf("  • GET  /api/equity-history?trader_id=xxx - 指定trader的收益率历史数据")
-	log.Printf("  • GET  /api/performance?trader_id=xxx - 指定trader的AI学习表现分析")
+	log.Printf("  • GET  /api/performance?trader_id=xxx - 指定trader的历史表现分析")
 	log.Printf("  • GET  /api/exchange-trades?trader_id=xxx - 交易所成交记录展示")
-	log.Printf("  • GET  /api/news/digests  - 近期新闻快讯摘要")
 	log.Printf("  • GET  /health               - 健康检查")
 	log.Println()
 
@@ -675,37 +671,6 @@ func (s *Server) handleActivePositions(c *gin.Context) {
 	activePositions := positionTracker.GetActivePositions()
 	log.Printf("📊 [%s] 获取活跃仓位: %d 条 (实时: %v)", traderID, len(activePositions), syncSuccess)
 	c.JSON(http.StatusOK, activePositions)
-}
-
-// handleNewsDigests 获取新闻摘要
-func (s *Server) handleNewsDigests(c *gin.Context) {
-	newsSvc := news.GetDefaultService()
-	if newsSvc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "news service unavailable",
-		})
-		return
-	}
-	digests := newsSvc.GetDigests()
-	sort.Slice(digests, func(i, j int) bool {
-		pi := digests[i].PublishedAt
-		pj := digests[j].PublishedAt
-		if pi.IsZero() {
-			pi = digests[i].CreatedAt
-		}
-		if pj.IsZero() {
-			pj = digests[j].CreatedAt
-		}
-		return pi.After(pj)
-	})
-	if len(digests) > 10 {
-		digests = digests[:10]
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"digests":    digests,
-		"count":      len(digests),
-		"updated_at": time.Now().Format("2006-01-02 15:04:05"),
-	})
 }
 
 // handlePositionHistory 获取历史仓位
@@ -850,34 +815,5 @@ func (s *Server) handleExportDecisions(c *gin.Context) {
 		"message": "决策日志导出成功",
 		"count":   len(records),
 		"records": records,
-	})
-}
-
-// handleTriggerLearning 触发AI学习刷新
-func (s *Server) handleTriggerLearning(c *gin.Context) {
-	_, traderID, err := s.getTraderFromQuery(c)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	auto, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
-	}
-
-	state, err := auto.ForceLearningUpdate()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("刷新学习状态失败: %v", err)})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message":              "学习状态已刷新",
-		"generated_at":         state.GeneratedAt.Format(time.RFC3339),
-		"confidence_threshold": state.Risk.ConfidenceThreshold,
-		"position_multiplier":  state.Risk.PositionSizeMultiplier,
-		"insights":             state.Insights,
 	})
 }

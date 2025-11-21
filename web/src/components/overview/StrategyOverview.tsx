@@ -62,36 +62,35 @@ export default function StrategyOverview() {
     return map;
   }, [totalsData]);
 
-  const cards = useMemo(() => {
-    return statusRows.map((row) => {
-      const stat = statsById.get(row.model_id);
-      const totals = latestTotals.get(row.model_id);
-      return {
-        id: row.model_id,
-        modelName: row.model_name || row.model_id,
-        aiModel: row.ai_model,
-        exchange: row.exchange,
-        aiProvider: row.ai_provider,
-        isRunning: row.is_running,
-        runtime: minutesToReadable(row.runtime_minutes),
-        callCount: fmtInt(row.call_count ?? 0),
-        scanInterval: row.scan_interval || "—",
-        stopUntil: isoToReadable(row.stop_until),
-        lastReset: isoToReadable(row.last_reset_time),
-        totalEquity: fmtUSD(row.total_equity ?? totals?.equity),
-        totalPnl: fmtUSD(row.total_pnl ?? totals?.pnl),
-        totalPnlPct: percentDisplay(
-          row.total_pnl_pct ?? (typeof totals?.pnlPct === "number" ? totals?.pnlPct : undefined),
-        ),
-        positionCount: fmtInt(row.position_count ?? 0),
-        marginUsedPct:
-          row.margin_used_pct != null && !Number.isNaN(row.margin_used_pct)
-            ? `${row.margin_used_pct.toFixed(2)}%`
-            : "—",
-        stat,
-      };
-    });
-  }, [statusRows, statsById, latestTotals]);
+    const cards = useMemo(() => {
+      return statusRows.map((row) => {
+        const stat = statsById.get(row.model_id);
+        const totals = latestTotals.get(row.model_id);
+        return {
+          id: row.model_id,
+          modelName: row.model_name || row.model_id,
+          strategy: row.strategy || row.strategy_label,
+          exchange: row.exchange,
+          isRunning: row.is_running,
+          runtime: minutesToReadable(row.runtime_minutes),
+          callCount: fmtInt(row.call_count ?? 0),
+          scanInterval: row.scan_interval || "—",
+          stopUntil: isoToReadable(row.stop_until),
+          lastReset: isoToReadable(row.last_reset_time),
+          totalEquity: fmtUSD(row.total_equity ?? totals?.equity),
+          totalPnl: fmtUSD(row.total_pnl ?? totals?.pnl),
+          totalPnlPct: percentDisplay(
+            row.total_pnl_pct ?? (typeof totals?.pnlPct === "number" ? totals?.pnlPct : undefined),
+          ),
+          positionCount: fmtInt(row.position_count ?? 0),
+          marginUsedPct:
+            row.margin_used_pct != null && !Number.isNaN(row.margin_used_pct)
+              ? `${row.margin_used_pct.toFixed(2)}%`
+              : "—",
+          stat,
+        };
+      });
+    }, [statusRows, statsById, latestTotals]);
 
   const hasData = cards.length > 0;
 
@@ -121,10 +120,10 @@ export default function StrategyOverview() {
                 <div className="flex items-center gap-2">
                   <ModelLogoChip modelId={card.id} size="md" />
                   <div>
-                    <div className="ui-sans text-sm font-semibold">{card.modelName}</div>
+                      <div className="ui-sans text-sm font-semibold">{card.modelName}</div>
                     <div className="text-[11px]" style={{ color: "var(--muted-text)" }}>
-                      {card.aiModel?.toUpperCase?.() ?? "AI"}
-                      {card.exchange ? ` · ${card.exchange}` : ""}
+                        {card.strategy?.toUpperCase?.() ?? "STRATEGY"}
+                        {card.exchange ? ` · ${card.exchange}` : ""}
                     </div>
                   </div>
                 </div>

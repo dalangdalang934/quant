@@ -7,9 +7,9 @@ import { endpoints, fetcher } from "../nof1";
 export interface StatusRow {
   model_id: string;
   model_name?: string;
-  ai_model?: string;
+  strategy?: string;
+  strategy_label?: string | null;
   exchange?: string;
-  ai_provider?: string;
   is_running?: boolean;
   runtime_minutes?: number;
   call_count?: number;

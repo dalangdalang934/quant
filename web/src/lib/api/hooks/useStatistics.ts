@@ -7,7 +7,7 @@ import { endpoints, fetcher } from "../nof1";
 export interface StatisticsRow {
   model_id: string;
   model_name?: string;
-  ai_model?: string;
+  strategy?: string;
   total_cycles?: number;
   successful_cycles?: number;
   failed_cycles?: number;

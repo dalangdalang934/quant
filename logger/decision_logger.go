@@ -19,8 +19,8 @@ import (
 type DecisionRecord struct {
 	Timestamp      time.Time          `json:"timestamp"`       // 决策时间
 	CycleNumber    int                `json:"cycle_number"`    // 周期编号
-	InputPrompt    string             `json:"input_prompt"`    // 发送给AI的输入prompt
-	CoTTrace       string             `json:"cot_trace"`       // AI思维链（输出）
+	InputPrompt    string             `json:"input_prompt"`    // 策略输入上下文
+	CoTTrace       string             `json:"cot_trace"`       // 决策分析轨迹
 	DecisionJSON   string             `json:"decision_json"`   // 决策JSON
 	AccountState   AccountSnapshot    `json:"account_state"`   // 账户状态快照
 	Positions      []PositionSnapshot `json:"positions"`       // 持仓快照

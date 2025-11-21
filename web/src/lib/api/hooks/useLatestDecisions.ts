@@ -24,7 +24,7 @@ export interface LatestDecisionRecord {
 export interface LatestDecisionRow {
   model_id: string;
   model_name?: string;
-  ai_model?: string;
+  strategy?: string;
   records: LatestDecisionRecord[];
 }
 

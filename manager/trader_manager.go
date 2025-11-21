@@ -1,6 +1,3 @@
-//go:build ai
-// +build ai
-
 package manager
 
 import (
@@ -196,7 +193,7 @@ func (tm *TraderManager) GetComparisonData() (map[string]interface{}, error) {
 		traders = append(traders, map[string]interface{}{
 			"trader_id":       t.GetID(),
 			"trader_name":     t.GetName(),
-			"ai_model":        t.GetAIModel(),
+			"strategy":        t.GetStrategyLabel(),
 			"total_equity":    account["total_equity"],
 			"total_pnl":       account["total_pnl"],
 			"total_pnl_pct":   account["total_pnl_pct"],

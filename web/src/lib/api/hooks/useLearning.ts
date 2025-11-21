@@ -6,7 +6,7 @@ import { endpoints, fetcher } from "../nof1";
 export interface LearningSummary {
   model_id: string;
   model_name?: string;
-  ai_model?: string;
+  strategy?: string;
   totals: {
     total_trades: number;
     winning_trades: number;

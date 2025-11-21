@@ -1,6 +1,3 @@
-//go:build ai
-// +build ai
-
 package decision
 
 import (
@@ -8,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"nofx/learning"
 	"nofx/market"
 	"nofx/pool"
 	"nofx/strategy"
@@ -50,7 +46,7 @@ type CandidateCoin struct {
 	Sources []string `json:"sources"` // 来源: "ai500" 和/或 "oi_top"
 }
 
-// OITopData 持仓量增长Top数据（用于AI决策参考）
+// OITopData 持仓量增长Top数据（用于决策参考）
 type OITopData struct {
 	Rank              int     // OI Top排名
 	OIDeltaPercent    float64 // 持仓量变化百分比（1小时）
@@ -60,7 +56,7 @@ type OITopData struct {
 	NetShort          float64 // 净空仓
 }
 
-// Context 交易上下文（传递给AI的完整信息）
+// Context 交易上下文（传递给量化引擎的完整信息）
 type Context struct {
 	CurrentTime     string                  `json:"current_time"`
 	RuntimeMinutes  int                     `json:"runtime_minutes"`
@@ -71,23 +67,12 @@ type Context struct {
 	MarketDataMap   map[string]*market.Data `json:"-"` // 不序列化，但内部使用
 	OITopDataMap    map[string]*OITopData   `json:"-"` // OI Top数据映射
 	Performance     interface{}             `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
-	NewsDigests     interface{}             `json:"-"` // 新闻摘要列表（[]news.Digest）
 	BTCETHLeverage  int                     `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
 	AltcoinLeverage int                     `json:"-"` // 山寨币杠杆倍数（从配置读取）
-	LearningState   *learning.State         `json:"-"`
-	HistoryWarmup   bool                    `json:"-"`
 	Strategy        strategy.QuantConfig    `json:"-"`
 }
 
-// LearningStateCopy 返回学习状态的深拷贝，用于跨 goroutine 安全使用
-func (ctx *Context) LearningStateCopy() (*learning.State, bool) {
-	if ctx == nil || ctx.LearningState == nil {
-		return nil, false
-	}
-	return ctx.LearningState.Copy(), true
-}
-
-// Decision AI的交易决策
+// Decision 量化策略生成的交易指令
 type Decision struct {
 	Symbol          string  `json:"symbol"`
 	Action          string  `json:"action"` // "open_long", "open_short", "close_long", "close_short", "hold", "wait"
@@ -101,10 +86,10 @@ type Decision struct {
 	PositionID      string  `json:"position_id,omitempty"` // 关联的仓位ID
 }
 
-// FullDecision AI的完整决策（包含思维链）
+// FullDecision 完整的策略输出（包含解释）
 type FullDecision struct {
-	UserPrompt string     `json:"user_prompt"` // 发送给AI的输入prompt
-	CoTTrace   string     `json:"cot_trace"`   // 思维链分析（AI输出）
+	UserPrompt string     `json:"user_prompt"` // 给策略的输入概览
+	CoTTrace   string     `json:"cot_trace"`   // 决策过程说明
 	Decisions  []Decision `json:"decisions"`   // 具体决策列表
 	Timestamp  time.Time  `json:"timestamp"`
 }
@@ -229,9 +214,6 @@ func evaluateQuantSignals(score *quantScore) {
 		} else if ctx.RSI14 < 35 {
 			pushLong(0.6, "RSI14<35 超卖(+0.6多)")
 		}
-		if ctx.ADX > 25 {
-			pushLong(0.2, "ADX>25 趋势清晰(+0.2)")
-		}
 	}
 
 	if ctx := data.LongerTermContext; ctx != nil {
@@ -240,6 +222,9 @@ func evaluateQuantSignals(score *quantScore) {
 		}
 		if ctx.EMA200 > 0 && price < ctx.EMA200 {
 			pushShort(0.5, "低于EMA200(+0.5)")
+		}
+		if ctx.ADX > 25 {
+			pushLong(0.2, "ADX>25 趋势清晰(+0.2)")
 		}
 	}
 
@@ -703,45 +688,6 @@ func calculateMaxCandidates(ctx *Context) int {
 	return len(ctx.CandidateCoins)
 }
 
-// buildSystemPrompt 构建 System Prompt（固定规则，可缓存）
-func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage int) string {
-	sampleBTCLeverage := btcEthLeverage
-	if sampleBTCLeverage > 5 {
-		sampleBTCLeverage = 5
-	}
-	if sampleBTCLeverage < 2 {
-		sampleBTCLeverage = 2
-	}
-	sampleAltcoinLeverage := altcoinLeverage
-	if sampleAltcoinLeverage > 3 {
-		sampleAltcoinLeverage = 3
-	}
-	if sampleAltcoinLeverage < 1 {
-		sampleAltcoinLeverage = 1
-	}
-
-	data := systemPromptTemplateData{
-		AccountEquity:         fmt.Sprintf("%.2f", accountEquity),
-		AltRangeLow:           fmt.Sprintf("%.0f", accountEquity*0.8),
-		AltRangeHigh:          fmt.Sprintf("%.0f", accountEquity*1.5),
-		BtcRangeLow:           fmt.Sprintf("%.0f", accountEquity*5),
-		BtcRangeHigh:          fmt.Sprintf("%.0f", accountEquity*10),
-		AltcoinLeverage:       altcoinLeverage,
-		BtcEthLeverage:        btcEthLeverage,
-		SampleBTCLeverage:     sampleBTCLeverage,
-		SampleAltcoinLeverage: sampleAltcoinLeverage,
-		SamplePositionUSD:     fmt.Sprintf("%.0f", accountEquity*5),
-	}
-
-	var sb strings.Builder
-	if err := systemPromptTpl.Execute(&sb, data); err != nil {
-		log.Printf("⚠️ 渲染系统 Prompt 模板失败: %v", err)
-		return ""
-	}
-
-	return sb.String()
-}
-
 // buildUserPrompt 构建 User Prompt（动态数据）
 func buildUserPrompt(ctx *Context) string {
 	var sb strings.Builder
@@ -774,10 +720,6 @@ func buildUserPrompt(ctx *Context) string {
 		sb.WriteString(fmt.Sprintf("🔒 **锁盈提醒**：累计收益 %.1f%%。进入防守状态：新增仓位≤40%%，最多2仓，同方向不连击，优先考虑减仓或观望，避免情绪化反击。\n\n", profitPct))
 	case profitPct <= -6:
 		sb.WriteString(fmt.Sprintf("🧊 **止血提示**：当前回撤 %.1f%%。缩减仓位并回顾失误；当风险回报重新≥1:2.8 且信心≥70 时，可尝试小仓重启，并在思维链记录风险补偿理由。\n\n", profitPct))
-	}
-
-	if ctx.HistoryWarmup {
-		sb.WriteString("⚠️ 周期日志与学习数据刚被清空，当前绩效统计仅供参考，请专注于高质量信号重新积累样本。\n\n")
 	}
 
 	// 持仓（完整市场数据）
@@ -879,7 +821,7 @@ func buildUserPrompt(ctx *Context) string {
 					}
 					sb.WriteString("\n")
 
-					// 显示各币种表现统计（帮助AI识别优势/劣势币种）
+					// 显示各币种表现统计，辅助人工复盘
 					if perfData.SymbolStats != nil && len(perfData.SymbolStats) > 0 {
 						sb.WriteString("### 📈 各币种表现统计\n\n")
 						// 按总盈亏排序，显示前10个币种
@@ -948,76 +890,6 @@ func buildUserPrompt(ctx *Context) string {
 		}
 	}
 
-	// 学习状态摘要
-	if ls := ctx.LearningState; ls != nil {
-		age := time.Since(ls.GeneratedAt)
-		ageText := "刚刚"
-		if age < 0 {
-			age = 0
-		}
-		if age.Hours() >= 1 {
-			hours := int(age.Hours())
-			minutes := int(age.Minutes()) % 60
-			if minutes > 0 {
-				ageText = fmt.Sprintf("%d小时%d分钟", hours, minutes)
-			} else {
-				ageText = fmt.Sprintf("%d小时", hours)
-			}
-		} else if age.Minutes() >= 1 {
-			ageText = fmt.Sprintf("%d分钟", int(age.Minutes()))
-		}
-
-		sb.WriteString("## 🧠 学习状态指令\n\n")
-		sb.WriteString(fmt.Sprintf("生成时间：%s（约%s前）\n\n", ls.GeneratedAt.Format("2006-01-02 15:04"), ageText))
-		sb.WriteString(fmt.Sprintf("- 概览：%s\n", ls.Summary))
-		sb.WriteString(fmt.Sprintf("- 风险指引：信心≥%d | 最多持仓%d | 仓位系数%.2f | 冷静期%d分钟\n",
-			ls.Risk.ConfidenceThreshold, ls.Risk.MaxConcurrentPositions, ls.Risk.PositionSizeMultiplier, ls.Risk.CooldownMinutes))
-		if ls.Execution.MinHoldMinutes > 0 || ls.Execution.MaxTradesPerHour > 0 {
-			sb.WriteString(fmt.Sprintf("- 执行约束：持仓不少于%d分钟 | 频率≤%.2f 笔/小时\n",
-				ls.Execution.MinHoldMinutes, ls.Execution.MaxTradesPerHour))
-		}
-
-		var focusList, avoidList, watchList []string
-		for _, directive := range ls.Symbols {
-			item := fmt.Sprintf("%s (%s)", directive.Symbol, directive.Reason)
-			switch directive.Action {
-			case "focus":
-				focusList = append(focusList, item)
-			case "avoid":
-				avoidList = append(avoidList, item)
-			default:
-				watchList = append(watchList, item)
-			}
-		}
-		if len(focusList) > 0 {
-			sb.WriteString(fmt.Sprintf("- 重点关注：%s\n", strings.Join(focusList, "；")))
-		}
-		if len(avoidList) > 0 {
-			sb.WriteString(fmt.Sprintf("- 禁止开仓：%s\n", strings.Join(avoidList, "；")))
-		}
-		if len(watchList) > 0 {
-			sb.WriteString(fmt.Sprintf("- 观察名单：%s\n", strings.Join(watchList, "；")))
-		}
-
-		if len(ls.Execution.Comments) > 0 {
-			sb.WriteString("- 执行提示：\n")
-			for _, comment := range ls.Execution.Comments {
-				sb.WriteString(fmt.Sprintf("  • %s\n", comment))
-			}
-		}
-		if len(ls.Insights) > 0 {
-			sb.WriteString("- 反思重点：\n")
-			for _, insight := range ls.Insights {
-				sb.WriteString(fmt.Sprintf("  • %s\n", insight))
-			}
-		}
-		// Adjustment 字段已经被移除，改为显示风险控制参数
-		sb.WriteString(fmt.Sprintf("- 仓位倍数系数：%.2f\n", ls.Risk.PositionSizeMultiplier))
-		sb.WriteString(fmt.Sprintf("- 信心阈值：%d%%\n", ls.Risk.ConfidenceThreshold))
-		sb.WriteString(fmt.Sprintf("- 最大并发持仓：%d\n", ls.Risk.MaxConcurrentPositions))
-		sb.WriteString("\n")
-	}
-
 	// 如果只有部分数据或数据获取失败，至少显示夏普比率
 	if ctx.Performance != nil && !hasFullData {
 		if sharpeRatio != 0 {
@@ -1025,7 +897,7 @@ func buildUserPrompt(ctx *Context) string {
 		}
 	}
 
-	// 显示最近交易明细（帮助AI深度学习和反思）
+	// 显示最近交易明细，辅助策略复盘
 	if ctx.Performance != nil {
 		type PerformanceDataFull struct {
 			RecentTrades []map[string]interface{} `json:"recent_trades"`
@@ -1076,39 +948,6 @@ func buildUserPrompt(ctx *Context) string {
 					sb.WriteString("- 持仓时间是否合理？（<30分钟可能过早平仓）\n")
 					sb.WriteString("- 哪些币种表现好/差？应该重点关注哪些币种？\n")
 					sb.WriteString("- 是否存在重复的错误模式？（如频繁交易、过早平仓等）\n\n")
-				}
-			}
-		}
-	}
-
-	// 新闻摘要（最近2小时，最多5条）
-	if ctx.NewsDigests != nil {
-		type NewsDigest struct {
-			Headline    string    `json:"headline"`
-			Summary     string    `json:"summary"`
-			Impact      string    `json:"impact"`
-			Sentiment   string    `json:"sentiment"`
-			Confidence  int       `json:"confidence"`
-			PublishedAt time.Time `json:"published_at"`
-		}
-		var digests []NewsDigest
-		if jsonData, err := json.Marshal(ctx.NewsDigests); err == nil {
-			if err := json.Unmarshal(jsonData, &digests); err == nil {
-				// 只显示最近5条
-				maxNews := 5
-				if len(digests) > maxNews {
-					digests = digests[:maxNews]
-				}
-				if len(digests) > 0 {
-					sb.WriteString("## 📰 市场新闻摘要（最近2小时）\n\n")
-					for i, d := range digests {
-						sb.WriteString(fmt.Sprintf("**%d. %s**\n", i+1, d.Headline))
-						sb.WriteString(fmt.Sprintf("   - 影响: %s | 情绪: %s | 置信度: %d%%\n", d.Impact, d.Sentiment, d.Confidence))
-						if d.Summary != "" {
-							sb.WriteString(fmt.Sprintf("   - 摘要: %s\n", d.Summary))
-						}
-						sb.WriteString("\n")
-					}
 				}
 			}
 		}

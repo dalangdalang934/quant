@@ -7,7 +7,7 @@ import { endpoints, fetcher } from "../nof1";
 export interface TraderInfoRecord {
   model_id: string;
   model_name?: string;
-  ai_model?: string;
+  strategy?: string;
   exchange?: string;
 }
 

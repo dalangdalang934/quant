@@ -1,6 +1,3 @@
-//go:build ai
-// +build ai
-
 package trader
 
 import (
@@ -10,10 +7,8 @@ import (
 	"log"
 	"math"
 	"nofx/decision"
-	"nofx/learning"
 	"nofx/logger"
 	"nofx/market"
-	"nofx/news"
 	"nofx/pool"
 	"nofx/strategy"
 	"os"
@@ -108,7 +103,7 @@ type AutoTrader struct {
 	stopUntil             time.Time
 	isRunning             bool
 	startTime             time.Time        // 系统启动时间
-	callCount             int              // AI调用次数
+	callCount             int              // 策略执行次数
 	positionFirstSeenTime map[string]int64 // 持仓首次出现时间 (symbol_side -> timestamp毫秒)
 	lastOpenActionTime    time.Time        // 最近一次开仓执行时间
 	openActionHistory     []time.Time      // 最近1小时内的开仓时间戳
@@ -120,12 +115,6 @@ type AutoTrader struct {
 	// 交易所成交记录缓存
 	exchangeTradesFile  string       // 交易所成交记录文件路径
 	exchangeTradesMutex sync.RWMutex // 交易所成交记录互斥锁
-
-	// 学习状态
-	learningManager       *learning.Manager
-	learningState         *learning.State
-	learningMutex         sync.RWMutex
-	historyWarmupNotified bool
 
 	// 仓位追踪
 	positionTracker *PositionTracker // 仓位追踪器
@@ -216,10 +205,6 @@ func NewAutoTrader(config AutoTraderConfig) (*AutoTrader, error) {
 	}
 	exchangeTradesFile := filepath.Join(exchangeTradesDir, fmt.Sprintf("%s.json", config.ID))
 
-	// 初始化学习状态管理器
-	learningDir := filepath.Join("data", "learning_state")
-	learningManager := learning.NewManager(config.ID, learningDir)
-
 	// 初始化仓位追踪器
 	positionTracker := NewPositionTracker(config.ID)
 	if matcher, ok := trader.(TradeFillMatcher); ok {
@@ -251,29 +236,10 @@ func NewAutoTrader(config AutoTraderConfig) (*AutoTrader, error) {
 		openActionHistory:     make([]time.Time, 0, 8),
 		lastPositionSnapshot:  make(map[string]logger.PositionSnapshot),
 		exchangeTradesFile:    exchangeTradesFile,
-		learningManager:       learningManager,
 		positionTracker:       positionTracker,
 		binanceStream:         config.BinanceStream,
 		quantConfig:           config.QuantConfig.Copy(),
 	}, nil
-}
-
-func (at *AutoTrader) updateLearningState(state *learning.State) {
-	if state == nil {
-		return
-	}
-	at.learningMutex.Lock()
-	defer at.learningMutex.Unlock()
-	at.learningState = state.Copy()
-}
-
-func (at *AutoTrader) getLearningState() *learning.State {
-	at.learningMutex.RLock()
-	defer at.learningMutex.RUnlock()
-	if at.learningState == nil {
-		return nil
-	}
-	return at.learningState.Copy()
 }
 
 // RestorePositionContext 恢复持仓上下文（程序启动时调用）
@@ -525,10 +491,10 @@ func (at *AutoTrader) Run() error {
 		log.Printf("⚠️  [%s] 加载交易所成交记录失败: %v", at.name, err)
 	}
 
-	log.Println("🚀 AI驱动自动交易系统启动")
+	log.Println("🚀 量化交易执行引擎启动")
 	log.Printf("💰 初始余额: %.2f USDT", at.initialBalance)
 	log.Printf("⚙️  扫描间隔: %v", at.config.ScanInterval)
-	log.Println("🤖 AI将全权决定杠杆、仓位大小、止损止盈等参数")
+	log.Println("📊 策略将根据参数自动决定杠杆、仓位大小以及止损止盈")
 
 	ticker := time.NewTicker(at.config.ScanInterval)
 	defer ticker.Stop()
@@ -561,7 +527,7 @@ func (at *AutoTrader) Stop() {
 	log.Println("⏹ 自动交易系统停止")
 }
 
-// runCycle 运行一个交易周期（使用AI全权决策）
+// runCycle 运行一个量化交易周期
 func (at *AutoTrader) runCycle() error {
 	at.callCount++
 
@@ -572,7 +538,7 @@ func (at *AutoTrader) runCycle() error {
 
 	log.Println()
 	log.Println(strings.Repeat("=", 70))
-	log.Printf("⏰ %s - AI决策周期 #%d", time.Now().Format("2006-01-02 15:04:05"), at.callCount)
+	log.Printf("⏰ %s - 量化周期 #%d", time.Now().Format("2006-01-02 15:04:05"), at.callCount)
 	log.Println(strings.Repeat("=", 70))
 
 	// 创建决策记录
@@ -645,9 +611,9 @@ func (at *AutoTrader) runCycle() error {
 	log.Printf("📊 账户净值: %.2f USDT | 可用: %.2f USDT | 持仓: %d",
 		ctx.Account.TotalEquity, ctx.Account.AvailableBalance, ctx.Account.PositionCount)
 
-	// 4. 调用AI获取完整决策
-	log.Println("🤖 正在请求AI分析并决策...")
-	decision, err := decision.GetFullDecision(ctx, at.mcpClient)
+	// 4. 生成量化决策
+	log.Println("📊 根据量化信号生成新的仓位计划...")
+	decision, err := decision.GetFullDecision(ctx)
 
 	// 即使有错误，也保存思维链、决策和输入prompt（用于debug）
 	if decision != nil {
@@ -661,13 +627,13 @@ func (at *AutoTrader) runCycle() error {
 
 	if err != nil {
 		record.Success = false
-		record.ErrorMessage = fmt.Sprintf("获取AI决策失败: %v", err)
+		record.ErrorMessage = fmt.Sprintf("生成量化决策失败: %v", err)
 
-		// 打印AI思维链（即使有错误）
+		// 打印策略分析（即使有错误）
 		if decision != nil && decision.CoTTrace != "" {
 			log.Println()
 			log.Println(strings.Repeat("-", 70))
-			log.Println("💭 AI思维链分析（错误情况）:")
+			log.Println("💭 决策分析（错误情况）:")
 			log.Println(strings.Repeat("-", 70))
 			log.Println(decision.CoTTrace)
 			log.Println(strings.Repeat("-", 70))
@@ -675,27 +641,28 @@ func (at *AutoTrader) runCycle() error {
 		}
 
 		at.decisionLogger.LogDecision(record)
-		return fmt.Errorf("获取AI决策失败: %w", err)
+		return fmt.Errorf("生成量化决策失败: %w", err)
 	}
 
-	// 5. 打印AI思维链
+	// 5. 打印策略分析
 	log.Println()
 	log.Println(strings.Repeat("-", 70))
-	log.Println("💭 AI思维链分析:")
+	log.Println("💭 决策分析:")
 	log.Println(strings.Repeat("-", 70))
 	log.Println(decision.CoTTrace)
 	log.Println(strings.Repeat("-", 70))
 	log.Println()
 
-	// 6. 应用学习状态约束
-	adjustedDecisions, constraintNotes := at.applyLearningConstraints(ctx, decision.Decisions)
+	// 6. 应用基础风控约束（已精简）
+	adjustedDecisions := at.applyRiskGuards(ctx, decision.Decisions)
+	constraintNotes := []string{}
 	for _, note := range constraintNotes {
 		log.Println(note)
 		record.ExecutionLog = append(record.ExecutionLog, note)
 	}
 
-	// 7. 打印AI决策
-	log.Printf("📋 AI决策列表 (%d 个):\n", len(adjustedDecisions))
+	// 7. 打印决策
+	log.Printf("📋 量化决策列表 (%d 个):\n", len(adjustedDecisions))
 	for i, d := range adjustedDecisions {
 		log.Printf("  [%d] %s: %s - %s", i+1, d.Symbol, d.Action, d.Reasoning)
 		if d.Action == "open_long" || d.Action == "open_short" {
@@ -901,9 +868,9 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 	}
 
 	// 3. 获取合并的候选币种池（AI500 + OI Top，去重）
-	// 无论有没有持仓，都分析相同数量的币种（让AI看到所有好机会）
-	// AI会根据保证金使用率和现有持仓情况，自己决定是否要换仓
-	const ai500Limit = 20 // AI500取前20个评分最高的币种
+	// 无论有没有持仓，都分析相同数量的币种，保持信号输入一致
+	// 策略会根据保证金使用率和现有持仓情况自行决定是否换仓
+	const ai500Limit = 20 // AI500 取前20个评分最高的币种
 
 	// 获取合并后的币种池（AI500 + OI Top）
 	mergedPool, err := pool.GetMergedCoinPool(ai500Limit)
@@ -946,7 +913,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		performance = nil
 	}
 
-	// 5.1. 获取交易所成交记录并生成快照（仅用于展示，不用于AI学习）
+	// 5.1. 获取交易所成交记录并生成快照（仅用于展示，不影响策略）
 	if exchangeTrades, err := at.GetTradeHistory(1000); err != nil {
 		log.Printf("⚠️  获取交易所历史成交失败: %v，将仅使用决策日志数据", err)
 	} else {
@@ -954,13 +921,13 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		if performance != nil {
 			localTrades = performance.RecentTrades
 		}
-		summaries := summarizeExchangeTrades(exchangeTrades, localTrades, at.aiModel, at.config.ScanInterval)
+		summaries := summarizeExchangeTrades(exchangeTrades, localTrades, at.strategyLabel, at.config.ScanInterval)
 		if err := at.writeExchangeTrades(summaries); err != nil {
 			log.Printf("⚠️  写入交易所成交汇总失败: %v", err)
 		}
 	}
 
-	// 5.2. 保存仓位历史（用于AI学习）
+	// 5.2. 保存仓位历史（用于策略复盘）
 	if performance != nil && len(performance.RecentTrades) > 0 {
 		if err := at.writePositionHistory(performance.RecentTrades); err != nil {
 			log.Printf("⚠️  保存仓位历史失败: %v", err)
@@ -968,84 +935,13 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 	}
 
 	// 5.3. 更新学习状态缓存
-	var learningState *learning.State
-	if at.learningManager != nil {
-		if performance != nil {
-			if state, err := at.learningManager.Update(at.id, performance); err != nil {
-				log.Printf("⚠️  生成学习状态失败: %v", err)
-				learningState = at.getLearningState()
-			} else {
-				at.updateLearningState(state)
-				learningState = state.Copy()
-			}
-		} else if cached := at.getLearningState(); cached != nil {
-			learningState = cached
-		} else if state, err := at.learningManager.Load(at.id); err == nil {
-			at.updateLearningState(state)
-			learningState = state.Copy()
-		}
-	}
-
-	historyWarmup := false
-	if performance == nil || performance.TotalTrades == 0 {
-		historyWarmup = true
-	}
-	if learningState == nil {
-		historyWarmup = true
-	}
-	if historyWarmup {
-		if !at.historyWarmupNotified {
-			log.Printf("ℹ️ [%s] 历史日志与学习数据为空，AI 将从头积累数据，当前绩效统计仅供参考", at.name)
-			at.historyWarmupNotified = true
-		}
-	} else {
-		if at.historyWarmupNotified {
-			at.historyWarmupNotified = false
-		}
-	}
-
-	if learningState != nil && len(candidateCoins) > 0 {
-		avoidSymbols := make(map[string]string)
-		for _, directive := range learningState.Symbols {
-			if directive.Action == "avoid" {
-				avoidSymbols[strings.ToUpper(directive.Symbol)] = directive.Reason
-			}
-		}
-		if len(avoidSymbols) > 0 {
-			var filtered []decision.CandidateCoin
-			var removed []string
-			for _, coin := range candidateCoins {
-				symbolUpper := strings.ToUpper(coin.Symbol)
-				if reason, blocked := avoidSymbols[symbolUpper]; blocked {
-					removed = append(removed, fmt.Sprintf("%s(%s)", symbolUpper, reason))
-					continue
-				}
-				filtered = append(filtered, coin)
-			}
-			if len(removed) > 0 {
-				log.Printf("🎯 学习状态过滤候选币种: %s", strings.Join(removed, ", "))
-			}
-			candidateCoins = filtered
-		}
-	}
-
-	// 6. 获取新闻摘要（如果新闻服务可用）
-	var newsDigests interface{}
-	if newsSvc := news.GetDefaultService(); newsSvc != nil {
-		digests := newsSvc.GetDigests()
-		if len(digests) > 0 {
-			newsDigests = digests
-		}
-	}
-
-	// 7. 构建上下文
+	// 6. 构建上下文
 	ctx := &decision.Context{
 		CurrentTime:     time.Now().Format("2006-01-02 15:04:05"),
 		RuntimeMinutes:  int(time.Since(at.startTime).Minutes()),
 		CallCount:       at.callCount,
 		BTCETHLeverage:  at.config.BTCETHLeverage,  // 使用配置的杠杆倍数
 		AltcoinLeverage: at.config.AltcoinLeverage, // 使用配置的杠杆倍数
-		HistoryWarmup:   historyWarmup,
 		Account: decision.AccountInfo{
 			TotalEquity:      totalEquity,
 			AvailableBalance: availableBalance,
@@ -1057,172 +953,55 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		},
 		Positions:      positionInfos,
 		CandidateCoins: candidateCoins,
-		Performance:    performance,   // 添加历史表现分析
-		NewsDigests:    newsDigests,   // 添加新闻摘要
-		LearningState:  learningState, // 学习状态
+		Performance:    performance, // 添加历史表现分析
+		Strategy:       at.quantConfig.Copy(),
 	}
 
 	return ctx, nil
 }
 
-func (at *AutoTrader) applyLearningConstraints(ctx *decision.Context, decisions []decision.Decision) ([]decision.Decision, []string) {
-	state, ok := ctx.LearningStateCopy()
-	if !ok || state == nil {
-		return decisions, nil
+func (at *AutoTrader) applyRiskGuards(ctx *decision.Context, decisions []decision.Decision) []decision.Decision {
+	if ctx == nil {
+		return decisions
 	}
 
-	avoid := make(map[string]string)
-	for _, directive := range state.Symbols {
-		if directive.Action == "avoid" {
-			avoid[strings.ToUpper(directive.Symbol)] = directive.Reason
+	longActive := 0
+	shortActive := 0
+	for _, pos := range ctx.Positions {
+		switch strings.ToLower(pos.Side) {
+		case "long":
+			longActive++
+		case "short":
+			shortActive++
 		}
 	}
 
-	risk := state.Risk
-	execution := state.Execution
-	globalNotes := []string{}
-	profitPct := ctx.Account.TotalPnLPct
-
-	lock := func(target float64, maxPositions int) {
-		if target <= 0 {
-			target = 0.25
-		}
-		if risk.PositionSizeMultiplier <= 0 || risk.PositionSizeMultiplier > target {
-			risk.PositionSizeMultiplier = target
-		}
-		if risk.MaxConcurrentPositions == 0 || risk.MaxConcurrentPositions > maxPositions {
-			risk.MaxConcurrentPositions = maxPositions
-		}
+	longSlots := at.quantConfig.MaxLongPositions - longActive
+	if longSlots < 0 {
+		longSlots = 0
 	}
-
-	switch {
-	case profitPct >= 15:
-		lock(0.25, 1)
-		globalNotes = append(globalNotes, fmt.Sprintf("🔐 超级锁盈模式：净值+%.1f%%，仓位系数≤%.2f，最大持仓≤%d", profitPct, risk.PositionSizeMultiplier, risk.MaxConcurrentPositions))
-	case profitPct >= 8:
-		lock(0.4, 2)
-		globalNotes = append(globalNotes, fmt.Sprintf("🔒 锁盈保护：净值+%.1f%%，仓位系数≤%.2f，最大持仓≤%d", profitPct, risk.PositionSizeMultiplier, risk.MaxConcurrentPositions))
-	case profitPct <= -6:
-		if risk.PositionSizeMultiplier <= 0 || risk.PositionSizeMultiplier > 0.6 {
-			risk.PositionSizeMultiplier = 0.6
-		}
-		if risk.ConfidenceThreshold < 70 {
-			risk.ConfidenceThreshold = 70
-		} else if risk.ConfidenceThreshold > 72 {
-			risk.ConfidenceThreshold = 72
-		}
-		globalNotes = append(globalNotes, fmt.Sprintf("🧊 回撤减速器：净值%.1f%%，仓位系数收紧至%.2f", profitPct, risk.PositionSizeMultiplier))
+	shortSlots := at.quantConfig.MaxShortPositions - shortActive
+	if shortSlots < 0 {
+		shortSlots = 0
 	}
-
-	minConfidence := 72
-	if risk.ConfidenceThreshold > minConfidence {
-		minConfidence = risk.ConfidenceThreshold
-	}
-
-	maxSlots := math.MaxInt32
-	if risk.MaxConcurrentPositions > 0 {
-		remaining := risk.MaxConcurrentPositions - ctx.Account.PositionCount
-		if remaining < 0 {
-			remaining = 0
-		}
-		maxSlots = remaining
-	}
-
-	var cooldownUntil time.Time
-	if risk.CooldownMinutes > 0 && !at.lastOpenActionTime.IsZero() {
-		cooldownUntil = at.lastOpenActionTime.Add(time.Duration(risk.CooldownMinutes) * time.Minute)
-	}
-
-	now := time.Now()
-	if execution.MaxTradesPerHour > 0 {
-		at.trimOpenHistory(now.Add(-1 * time.Hour))
-	}
-	minHoldDuration := time.Duration(execution.MinHoldMinutes) * time.Minute
 
 	result := make([]decision.Decision, 0, len(decisions))
-	var notes []string
-	scheduledOpens := 0
-
 	for _, d := range decisions {
-		action := d.Action
-		isOpen := action == "open_long" || action == "open_short"
-		isClose := action == "close_long" || action == "close_short"
-		symbolUpper := strings.ToUpper(d.Symbol)
-
-		if isClose && minHoldDuration > 0 {
-			side := "long"
-			if action == "close_short" {
-				side = "short"
+		switch d.Action {
+		case "open_long":
+			if longSlots <= 0 {
+				continue
 			}
-			posKey := d.Symbol + "_" + side
-			firstSeen := at.positionFirstSeenTime[posKey]
-			if firstSeen == 0 {
-				for _, pos := range ctx.Positions {
-					if strings.EqualFold(pos.Symbol, d.Symbol) && strings.EqualFold(pos.Side, side) {
-						firstSeen = pos.UpdateTime
-						break
-					}
-				}
+			longSlots--
+		case "open_short":
+			if !at.quantConfig.AllowShort || shortSlots <= 0 {
+				continue
 			}
-			if firstSeen > 0 {
-				held := now.Sub(time.UnixMilli(firstSeen))
-				if held < minHoldDuration {
-					notes = append(notes, fmt.Sprintf("⚠️ %s %s 被拒绝：持仓仅%.1f分钟，需满足最少 %d 分钟", symbolUpper, action, held.Minutes(), execution.MinHoldMinutes))
-					continue
-				}
-			}
+			shortSlots--
 		}
-
-		if isOpen {
-			if reason, blocked := avoid[symbolUpper]; blocked {
-				notes = append(notes, fmt.Sprintf("⚠️ %s %s 被拒绝：学习状态标记为避开（%s）", symbolUpper, action, reason))
-				continue
-			}
-			if minConfidence > 0 && d.Confidence > 0 && d.Confidence < minConfidence {
-				notes = append(notes, fmt.Sprintf("⚠️ %s %s 被拒绝：信心 %d 低于最低要求 %d", symbolUpper, action, d.Confidence, minConfidence))
-				continue
-			}
-			if maxSlots <= 0 {
-				notes = append(notes, fmt.Sprintf(
-					"⚠️ %s %s 被拒绝：学习状态将最大持仓收紧至 %d（当前持仓 %d）",
-					symbolUpper, action, risk.MaxConcurrentPositions, ctx.Account.PositionCount,
-				))
-				continue
-			}
-			if !cooldownUntil.IsZero() && now.Before(cooldownUntil) {
-				remaining := cooldownUntil.Sub(now).Minutes()
-				notes = append(notes, fmt.Sprintf("⚠️ %s %s 被拒绝：冷静期尚未结束（剩余 %.1f 分钟）", symbolUpper, action, remaining))
-				continue
-			}
-			if execution.MaxTradesPerHour > 0 {
-				executed := len(at.openActionHistory) + scheduledOpens
-				if float64(executed) >= execution.MaxTradesPerHour {
-					notes = append(notes, fmt.Sprintf("⚠️ %s %s 被拒绝：每小时最多 %.2f 笔，最近1小时已登记 %d 笔", symbolUpper, action, execution.MaxTradesPerHour, executed))
-					continue
-				}
-			}
-			if risk.PositionSizeMultiplier > 0 && d.PositionSizeUSD > 0 {
-				adjusted := d.PositionSizeUSD * risk.PositionSizeMultiplier
-				if math.Abs(adjusted-d.PositionSizeUSD) > 1e-6 {
-					notes = append(notes, fmt.Sprintf("ℹ️ %s 仓位调整: %.2f → %.2f (乘 %.2f)", symbolUpper, d.PositionSizeUSD, adjusted, risk.PositionSizeMultiplier))
-					d.PositionSizeUSD = adjusted
-				}
-			}
-			if d.PositionSizeUSD > 0 && d.PositionSizeUSD < minPositionUSD {
-				notes = append(notes, fmt.Sprintf("⚠️ %s %s 被拒绝：仓位 %.2f 低于最低开仓金额 %.2f", symbolUpper, action, d.PositionSizeUSD, minPositionUSD))
-				continue
-			}
-			maxSlots--
-			scheduledOpens++
-			if risk.CooldownMinutes > 0 {
-				cooldownUntil = now.Add(time.Duration(risk.CooldownMinutes) * time.Minute)
-			}
-		}
-
 		result = append(result, d)
 	}
-
-	return result, append(globalNotes, notes...)
+	return result
 }
 
 func (at *AutoTrader) trimOpenHistory(cutoff time.Time) {
@@ -1246,7 +1025,7 @@ func (at *AutoTrader) recordOpenExecution() {
 	at.trimOpenHistory(now.Add(-1 * time.Hour))
 }
 
-// executeDecisionWithRecord 执行AI决策并记录详细信息
+// executeDecisionWithRecord 执行量化决策并记录详细信息
 func (at *AutoTrader) executeDecisionWithRecord(decision *decision.Decision, actionRecord *logger.DecisionAction) error {
 	switch decision.Action {
 	case "open_long":
@@ -1496,7 +1275,7 @@ func (at *AutoTrader) executeCloseLongWithRecord(decision *decision.Decision, ac
 	// 查找对应的仓位
 	var position *Position
 	if decision.PositionID != "" {
-		// 如果AI提供了position_id，优先使用
+		// 如果策略提供了position_id，优先使用
 		pos, err := at.positionTracker.GetPosition(decision.PositionID)
 		if err != nil {
 			log.Printf("  ⚠️ 未找到指定的仓位ID: %s，将尝试按币种查找", decision.PositionID)
@@ -1585,7 +1364,7 @@ func (at *AutoTrader) executeCloseShortWithRecord(decision *decision.Decision, a
 	// 查找对应的仓位
 	var position *Position
 	if decision.PositionID != "" {
-		// 如果AI提供了position_id，优先使用
+		// 如果策略提供了position_id，优先使用
 		pos, err := at.positionTracker.GetPosition(decision.PositionID)
 		if err != nil {
 			log.Printf("  ⚠️ 未找到指定的仓位ID: %s，将尝试按币种查找", decision.PositionID)
@@ -1670,34 +1449,14 @@ func (at *AutoTrader) GetName() string {
 	return at.name
 }
 
-// GetAIModel 获取AI模型
-func (at *AutoTrader) GetAIModel() string {
+// GetStrategyLabel 获取策略名称
+func (at *AutoTrader) GetStrategyLabel() string {
 	return at.strategyLabel
 }
 
 // GetDecisionLogger 获取决策日志记录器
 func (at *AutoTrader) GetDecisionLogger() *logger.DecisionLogger {
 	return at.decisionLogger
-}
-
-// ForceLearningUpdate 强制刷新学习状态
-func (at *AutoTrader) ForceLearningUpdate() (*learning.State, error) {
-	if at.learningManager == nil {
-		return nil, fmt.Errorf("学习状态管理器未初始化")
-	}
-
-	performance, err := at.decisionLogger.AnalyzePerformance(5000)
-	if err != nil {
-		return nil, fmt.Errorf("分析历史表现失败: %w", err)
-	}
-
-	state, err := at.learningManager.Update(at.id, performance)
-	if err != nil {
-		return nil, fmt.Errorf("生成学习状态失败: %w", err)
-	}
-
-	at.updateLearningState(state)
-	return state.Copy(), nil
 }
 
 // GetStatus 获取系统状态（用于API）
@@ -1707,7 +1466,7 @@ func (at *AutoTrader) GetStatus() map[string]interface{} {
 	return map[string]interface{}{
 		"trader_id":       at.id,
 		"trader_name":     at.name,
-		"ai_model":        at.strategyLabel,
+		"strategy":        at.strategyLabel,
 		"exchange":        at.exchange,
 		"is_running":      at.isRunning,
 		"start_time":      at.startTime.Format(time.RFC3339),
@@ -1717,7 +1476,7 @@ func (at *AutoTrader) GetStatus() map[string]interface{} {
 		"scan_interval":   at.config.ScanInterval.String(),
 		"stop_until":      at.stopUntil.Format(time.RFC3339),
 		"last_reset_time": at.lastResetTime.Format(time.RFC3339),
-		"ai_provider":     strategyName,
+		"strategy_label":  strategyName,
 	}
 }
 
@@ -2130,7 +1889,7 @@ func (at *AutoTrader) checkAndRecordPassiveCloses() error {
 	return nil
 }
 
-// PositionHistory 仓位历史记录（用于AI学习）
+// PositionHistory 仓位历史记录（用于策略复盘）
 type PositionHistory struct {
 	Trades      []logger.TradeOutcome `json:"trades"`
 	LastUpdated time.Time             `json:"last_updated"`
@@ -2386,7 +2145,7 @@ func (at *AutoTrader) GetExchangeTrades() ([]ExchangeTrade, error) {
 		if exitUnix == 0 && !item.ExitTime.IsZero() {
 			exitUnix = item.ExitTime.Unix()
 		}
-		tradeID := fmt.Sprintf("%s-%s-%d", at.aiModel, item.Symbol, exitUnix)
+		tradeID := fmt.Sprintf("%s-%s-%d", at.strategyLabel, item.Symbol, exitUnix)
 
 		source := item.Source
 		if source == "" {
@@ -2396,7 +2155,7 @@ func (at *AutoTrader) GetExchangeTrades() ([]ExchangeTrade, error) {
 		converted = append(converted, ExchangeTrade{
 			ID:                     tradeID,
 			Symbol:                 item.Symbol,
-			ModelID:                at.aiModel,
+			ModelID:                at.strategyLabel,
 			Side:                   item.Side,
 			Quantity:               item.Quantity,
 			OpenQuantity:           item.OpenQuantity,
@@ -2693,7 +2452,7 @@ func summarizeExchangeTrades(exchangeTrades []map[string]interface{}, localTrade
 	return results
 }
 
-// writePositionHistory 写入仓位历史（用于AI学习）
+// writePositionHistory 写入仓位历史（用于策略复盘）
 func (at *AutoTrader) writePositionHistory(trades []logger.TradeOutcome) error {
 	at.exchangeTradesMutex.Lock()
 	defer at.exchangeTradesMutex.Unlock()
@@ -2754,7 +2513,7 @@ func (at *AutoTrader) writePositionHistory(trades []logger.TradeOutcome) error {
 	return nil
 }
 
-// GetPositionHistory 获取仓位历史（用于AI学习）
+// GetPositionHistory 获取仓位历史（用于策略复盘）
 func (at *AutoTrader) GetPositionHistory() ([]logger.TradeOutcome, error) {
 	at.exchangeTradesMutex.RLock()
 	defer at.exchangeTradesMutex.RUnlock()
