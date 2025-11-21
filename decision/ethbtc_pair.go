@@ -7,7 +7,6 @@ import (
 	"math"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -74,17 +73,17 @@ func buildEthBtcPairDecisions(ctx *Context) []Decision {
 
 	switch {
 	case fastAboveNow && !fastAbovePrev:
-		if d, ok := buildPairOpenDecision(ctx, "ETHUSDT", "open_long", "ETH/BTC 21/55 金叉，多头对冲启动", defaultSize); ok {
+		if d, ok := buildPairOpenDecision(ctx, "ETH", "open_long", "ETH/BTC 21/55 金叉，多头对冲启动", defaultSize); ok {
 			decisions = append(decisions, d)
 		}
-		if d, ok := buildPairOpenDecision(ctx, "BTCUSDT", "open_short", "ETH/BTC 21/55 金叉，多头对冲启动", defaultSize); ok {
+		if d, ok := buildPairOpenDecision(ctx, "BTC", "open_short", "ETH/BTC 21/55 金叉，多头对冲启动", defaultSize); ok {
 			decisions = append(decisions, d)
 		}
 	case !fastAboveNow && fastAbovePrev:
-		if d, ok := buildPairOpenDecision(ctx, "ETHUSDT", "open_short", "ETH/BTC 21/55 死叉，空头对冲启动", defaultSize); ok {
+		if d, ok := buildPairOpenDecision(ctx, "ETH", "open_short", "ETH/BTC 21/55 死叉，空头对冲启动", defaultSize); ok {
 			decisions = append(decisions, d)
 		}
-		if d, ok := buildPairOpenDecision(ctx, "BTCUSDT", "open_long", "ETH/BTC 21/55 死叉，空头对冲启动", defaultSize); ok {
+		if d, ok := buildPairOpenDecision(ctx, "BTC", "open_long", "ETH/BTC 21/55 死叉，空头对冲启动", defaultSize); ok {
 			decisions = append(decisions, d)
 		}
 	}
@@ -127,7 +126,7 @@ func buildPairCloseDecisions(ctx *Context, direction, reason string) []Decision 
 	var decisions []Decision
 	switch direction {
 	case PairDirectionLong:
-		if pos := findPositionInfo(ctx, "ETHUSDT", "long"); pos != nil {
+		if pos := findPositionByAsset(ctx, "ETH", "long"); pos != nil {
 			decisions = append(decisions, Decision{
 				Symbol:      pos.Symbol,
 				Action:      "close_long",
@@ -136,7 +135,7 @@ func buildPairCloseDecisions(ctx *Context, direction, reason string) []Decision 
 				StrategyTag: StrategyTagEthBtcPair,
 			})
 		}
-		if pos := findPositionInfo(ctx, "BTCUSDT", "short"); pos != nil {
+		if pos := findPositionByAsset(ctx, "BTC", "short"); pos != nil {
 			decisions = append(decisions, Decision{
 				Symbol:      pos.Symbol,
 				Action:      "close_short",
@@ -146,7 +145,7 @@ func buildPairCloseDecisions(ctx *Context, direction, reason string) []Decision 
 			})
 		}
 	case PairDirectionShort:
-		if pos := findPositionInfo(ctx, "ETHUSDT", "short"); pos != nil {
+		if pos := findPositionByAsset(ctx, "ETH", "short"); pos != nil {
 			decisions = append(decisions, Decision{
 				Symbol:      pos.Symbol,
 				Action:      "close_short",
@@ -155,7 +154,7 @@ func buildPairCloseDecisions(ctx *Context, direction, reason string) []Decision 
 				StrategyTag: StrategyTagEthBtcPair,
 			})
 		}
-		if pos := findPositionInfo(ctx, "BTCUSDT", "long"); pos != nil {
+		if pos := findPositionByAsset(ctx, "BTC", "long"); pos != nil {
 			decisions = append(decisions, Decision{
 				Symbol:      pos.Symbol,
 				Action:      "close_long",
@@ -168,8 +167,8 @@ func buildPairCloseDecisions(ctx *Context, direction, reason string) []Decision 
 	return decisions
 }
 
-func buildPairOpenDecision(ctx *Context, symbol, action, reason string, defaultSize float64) (Decision, bool) {
-	data, ok := ctx.MarketDataMap[symbol]
+func buildPairOpenDecision(ctx *Context, asset, action, reason string, defaultSize float64) (Decision, bool) {
+	data, symbol, ok := marketDataForAsset(ctx, asset)
 	if !ok || data == nil || data.CurrentPrice <= 0 {
 		return Decision{}, false
 	}
@@ -198,10 +197,10 @@ func buildPairOpenDecision(ctx *Context, symbol, action, reason string, defaultS
 }
 
 func detectPairDirection(ctx *Context) string {
-	hasEthLong := findPositionInfo(ctx, "ETHUSDT", "long") != nil
-	hasEthShort := findPositionInfo(ctx, "ETHUSDT", "short") != nil
-	hasBtcLong := findPositionInfo(ctx, "BTCUSDT", "long") != nil
-	hasBtcShort := findPositionInfo(ctx, "BTCUSDT", "short") != nil
+	hasEthLong := findPositionByAsset(ctx, "ETH", "long") != nil
+	hasEthShort := findPositionByAsset(ctx, "ETH", "short") != nil
+	hasBtcLong := findPositionByAsset(ctx, "BTC", "long") != nil
+	hasBtcShort := findPositionByAsset(ctx, "BTC", "short") != nil
 
 	switch {
 	case hasEthLong && hasBtcShort:

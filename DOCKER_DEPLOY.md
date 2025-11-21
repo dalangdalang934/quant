@@ -7,18 +7,18 @@
 1. 安装 Docker 与 Docker Compose（Docker Desktop 已自带 Compose）。
 2. 在项目根目录准备好生产配置 `config.json`，其中包含交易所密钥、策略参数等敏感信息。此文件会在运行时以只读方式挂载到容器中。
 3. 如需自定义端口、配置文件或公开变量，可在项目根目录创建 `.env`，例如：
-   ```bash
-   # 后端
-   CONFIG_FILE=./config.prod.json
-   BACKEND_PORT=8080
-   TZ=Asia/Shanghai
+    ```bash
+    # 后端
+    CONFIG_FILE=./config.prod.json
+    BACKEND_PORT=8080
+    TZ=Asia/Shanghai
 
-   # 前端
-   FRONTEND_PORT=3000
-   NOF1_API_BASE_URL=http://backend:8080
-   NEXT_PUBLIC_NOF1_API_BASE_URL=/api/nof1
-   NEXT_PUBLIC_TICKER_PAIRS=BTCUSDT,ETHUSDT,SOLUSDT
-   ```
+    # 前端
+    FRONTEND_PORT=3000
+    NOF1_API_BASE_URL=http://backend:8080
+    NEXT_PUBLIC_NOF1_API_BASE_URL=/api/nof1
+    NEXT_PUBLIC_TICKER_PAIRS=BTCUSDT,BTCUSDC,ETHUSDT,ETHUSDC,SOLUSDT
+    ```
    Compose 会自动加载 `.env`，同时仍可在启动命令前 `export` 临时覆盖。
 
 ## 2. 构建镜像

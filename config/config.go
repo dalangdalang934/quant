@@ -78,6 +78,11 @@ type Config struct {
 	Leverage           LeverageConfig `json:"leverage"` // 杠杆配置
 }
 
+var optionalFuturesSymbols = map[string]bool{
+	"BTCUSDC": true,
+	"ETHUSDC": true,
+}
+
 // LoadConfig 从文件加载配置
 func LoadConfig(filename string) (*Config, error) {
 	data, err := os.ReadFile(filename)
@@ -99,8 +104,10 @@ func LoadConfig(filename string) (*Config, error) {
 	if len(config.DefaultCoins) == 0 {
 		config.DefaultCoins = []string{
 			"BTCUSDT",
+			"BTCUSDC",
 			"ZECUSDT",
 			"ETHUSDT",
+			"ETHUSDC",
 			"SOLUSDT",
 			"BNBUSDT",
 			"XRPUSDT",
@@ -293,6 +300,9 @@ func ensureFuturesSymbolsExist(symbols []string) error {
 			continue
 		}
 		if !list[symbol] {
+			if optionalFuturesSymbols[symbol] {
+				continue
+			}
 			missing = append(missing, symbol)
 		}
 	}

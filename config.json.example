@@ -31,7 +31,9 @@
   "use_default_coins": true,
   "default_coins": [
     "BTCUSDT",
+    "BTCUSDC",
     "ETHUSDT",
+    "ETHUSDC",
     "SOLUSDT",
     "BNBUSDT",
     "XRPUSDT",
