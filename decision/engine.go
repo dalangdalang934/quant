@@ -70,6 +70,7 @@ type Context struct {
 	BTCETHLeverage  int                     `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
 	AltcoinLeverage int                     `json:"-"` // 山寨币杠杆倍数（从配置读取）
 	Strategy        strategy.QuantConfig    `json:"-"`
+	PairState       *PairState              `json:"-"`
 }
 
 // Decision 量化策略生成的交易指令
@@ -84,6 +85,7 @@ type Decision struct {
 	RiskUSD         float64 `json:"risk_usd,omitempty"`   // 最大美元风险
 	Reasoning       string  `json:"reasoning"`
 	PositionID      string  `json:"position_id,omitempty"` // 关联的仓位ID
+	StrategyTag     string  `json:"strategy_tag,omitempty"`
 }
 
 // FullDecision 完整的策略输出（包含解释）
@@ -116,6 +118,9 @@ func GetFullDecision(ctx *Context) (*FullDecision, error) {
 
 	// 4. 根据得分与仓位状况生成交易计划
 	decisions := buildQuantDecisions(ctx, scores)
+	if pairDecisions := buildEthBtcPairDecisions(ctx); len(pairDecisions) > 0 {
+		decisions = append(decisions, pairDecisions...)
+	}
 
 	// 5. 构建可读的分析报告
 	narrative := buildQuantNarrative(ctx, scores, decisions)
@@ -627,6 +632,10 @@ func fetchMarketDataForContext(ctx *Context) error {
 		}
 		symbolSet[coin.Symbol] = true
 	}
+
+	// ETH/BTC 配对策略依赖的基础腿，确保行情一定可用
+	symbolSet["ETHUSDT"] = true
+	symbolSet["BTCUSDT"] = true
 
 	// 并发获取市场数据
 	// 持仓币种集合（用于判断是否跳过OI检查）
